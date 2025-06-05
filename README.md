@@ -11,7 +11,7 @@ pip install -r requirements.txt
 ## Prepare
 
 1. Open `plot_nbody.py` . Edit paths in `ConfigManager`. Most importantly:
-   - `pathof`: `simulation name` : `path to simulation directory` in the key:value form. You can freely name the sim.
+   - `pathof`: simulation_name: path_to_simulation_directory. You can freely name the sim.
    - `input_file_path_of`: put the path of the initial condition files. Some plots uses the initial values for data processing.
    - `figname_prefix`: prefix of every figure filename. Put something to make yourself & collaborators clear
    - `plot_dir`: path to save figures. [TODO: now save all figures in a single dir; sometimes cause slow speed to load with `ls`; will seperate into subdirs later]
