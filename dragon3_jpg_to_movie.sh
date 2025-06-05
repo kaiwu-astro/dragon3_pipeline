@@ -4,6 +4,7 @@ set -e
 # 记录总开始时间
 total_start_time=$(date +%s)
 
+PLOT_DIR='~/scratch/plot/jpg' # jpg图片所在的目录
 module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2 
 
 make_ffmpeg_list() {
@@ -61,7 +62,7 @@ plot_patterns=(
     "_mtot_vs_distance_loglog_compact_objects_only.jpg"
 )
 
-cd ~/scratch/plot/jpg/ # 确保在正确的目录
+cd $PLOT_DIR || { echo "Failed to change directory to $PLOT_DIR"; exit 1; }
 
 # 定义处理单个视频的函数
 process_video() {
@@ -84,6 +85,7 @@ process_video() {
     output_name="${simu_name_pattern}${plot_pattern}.mp4"
     rm -f "$output_name"
     
+    # ffmpeg -threads $n_threads -r 30 -f concat -safe 0 -i $list_file -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc -an -pix_fmt yuv420p -tag:v hvc1 -preset fast -movflags +faststart $output_name # pure cpu encoding (no gpu)
     ffmpeg -y -hwaccel cuda -r 30 -f concat -safe 0 -i $list_file -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc_nvenc -an -pix_fmt yuv420p -tag:v hvc1 -preset p1 -movflags +faststart $output_name
            
     end_time=$(date +%s) # 记录视频结束时间
