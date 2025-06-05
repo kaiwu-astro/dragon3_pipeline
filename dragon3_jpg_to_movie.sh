@@ -5,6 +5,7 @@ set -e
 total_start_time=$(date +%s)
 
 PLOT_DIR='~/scratch/plot/jpg' # jpg图片所在的目录
+MAX_PARALLEL_JOBS=15
 module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2 
 
 make_ffmpeg_list() {
@@ -93,9 +94,7 @@ process_video() {
     echo "Time taken for $output_name: $duration seconds" # 直接打印每个视频的持续时间
 }
 
-export -f process_video get_quality_params make_ffmpeg_list # 导出函数以供 xargs 使用
-
-MAX_PARALLEL_JOBS=15 
+export -f process_video get_quality_params make_ffmpeg_list # 导出函数以供 xargs 使用 
 
 # 生成组合并通过管道传递给 xargs 以并行执行
 ( # 使用子 shell 对 echo 命令进行分组
