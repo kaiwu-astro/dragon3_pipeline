@@ -140,16 +140,17 @@ class ConfigManager:
                 [(1,0,0), (0,0,0), (0.8,0.8,0.8)]
         self.st_verbose_to_color = {k: self.palette_st[v+1] for k, v in self.stellar_type_verbose_to_kw.items()}
         self.limits = {
-            'Distance_to_cluster_center[pc]': (1e-3, 1e3),
+            'Distance_to_cluster_center[pc]': (1e-3, 1e4),
             'Bin A[au]': (1e-3, 1e5),
             'mass_ratio': (5e-4, 1.01),
             'M': (0.06, 1050),
-            'Bin ECC': (1e-5, 1.2),
+            'Bin ECC': (1e-4, 1.2),
             'Teff*': (1e3, 1.05e6),
             'L*': (0.9e-5, 1e8),
             'position_pc_lim': (-15, 15),
             'Ebind/kT': (2e-7, 5e2),
             'tau_gw[Myr]': (9, 14000),
+            'velocity_kmps_lim': (-2000, 2000),
         }
         self.colname_to_label = {
             'Distance_to_cluster_center[pc]': 'r [pc]',
@@ -163,7 +164,10 @@ class ConfigManager:
             'Ebind/kT': r'$E_{bind}/kT$',
             'Teff*': r'$T_{eff}$ [K]',
             'L*': r'$L$ [L$_\odot$]',
-            'tau_gw[Myr]': r'$\tau_{gw}$ [Myr]'
+            'tau_gw[Myr]': r'$\tau_{gw}$ [Myr]',
+            'V1': r'$V_{x}$ [km/s]',
+            'V2': r'$V_{y}$ [km/s]',
+            'V3': r'$V_{z}$ [km/s]',
         }
         self._parse_argv(opts=opts)
         for simu_name in self.pathof.keys():
@@ -609,6 +613,31 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mass_vs_distance_loglog',
             extra_data_handler=extra_data_handler,
             extra_ax_handler=extra_ax_handler,
+            custom_ax_joint_decorator=None
+        )
+    
+    def create_vx_over_x_plot_density(
+            self, single_df_at_t, simu_name,
+            extra_data_handler: Callable | None = None,
+            extra_ax_handler: Callable | None = None
+            ):
+        def _symlogY_and_fill_handler(ax):
+            # log scale，but linear region around 0
+            linthresh = 1
+            ax.set_yscale('symlog', linthresh=linthresh)
+            # fill the linear region around 0
+            ax.axvspan(-linthresh, linthresh, color='0.2')
+        self._create_jointplot_density(
+            df_at_t=single_df_at_t,
+            simu_name=simu_name,
+            x_col='X [pc]',
+            y_col='V1',  
+            log_scale=(False, False),  
+            filename_var_part='vx_over_x',
+            xlim_key='position_pc_lim', 
+            ylim_key='velocity_kmps_lim', 
+            extra_data_handler=extra_data_handler,
+            extra_ax_handler=_symlogY_and_fill_handler,
             custom_ax_joint_decorator=None
         )
     
