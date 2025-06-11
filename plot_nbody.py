@@ -168,6 +168,9 @@ class ConfigManager:
             'V1': r'$V_{x}$ [km/s]',
             'V2': r'$V_{y}$ [km/s]',
             'V3': r'$V_{z}$ [km/s]',
+            'Bin cm V1': r'Bin $V_{x,cm}$ [km/s]',
+            'Bin cm V2': r'Bin $V_{y,cm}$ [km/s]',
+            'Bin cm V3': r'Bin $V_{z,cm}$ [km/s]',
         }
         self._parse_argv(opts=opts)
         for simu_name in self.pathof.keys():
@@ -596,6 +599,11 @@ class BaseHDF5Visualizer(BaseVisualizer):
         except NameError:
             plt.close(g.figure)
 
+    def _symlogY_and_fill_handler(ax, linthresh=1):
+        # log scale，but linear region around 0
+        ax.set_yscale('symlog', linthresh=linthresh)
+        # fill the linear region around 0
+        ax.axvspan(-linthresh, linthresh, color='0.2')
 
 class SingleStarVisualizer(BaseHDF5Visualizer):
     def create_mass_distance_plot_density(
@@ -616,28 +624,22 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=None
         )
     
-    def create_vx_over_x_plot_density(
+    def create_vx_x_plot_density(
             self, single_df_at_t, simu_name,
             extra_data_handler: Callable | None = None,
             extra_ax_handler: Callable | None = None
             ):
-        def _symlogY_and_fill_handler(ax):
-            # log scale，but linear region around 0
-            linthresh = 1
-            ax.set_yscale('symlog', linthresh=linthresh)
-            # fill the linear region around 0
-            ax.axvspan(-linthresh, linthresh, color='0.2')
         self._create_jointplot_density(
             df_at_t=single_df_at_t,
             simu_name=simu_name,
             x_col='X [pc]',
             y_col='V1',  
             log_scale=(False, False),  
-            filename_var_part='vx_over_x',
+            filename_var_part='allstar_vx_vs_x',
             xlim_key='position_pc_lim', 
             ylim_key='velocity_kmps_lim', 
             extra_data_handler=extra_data_handler,
-            extra_ax_handler=_symlogY_and_fill_handler,
+            extra_ax_handler=self._symlogY_and_fill_handler,
             custom_ax_joint_decorator=None
         )
     
@@ -1170,6 +1172,73 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             log_scale=(True, True),
             ylim_key='M',
             filename_var_part='mtot_vs_distance_loglog_compact_objects_only',
+            custom_ax_decorator=None
+        )
+
+    def create_semi_distance_plot_density(
+            self, binary_df_at_t, simu_name,
+            extra_data_handler: Callable | None = None,
+            extra_ax_handler: Callable | None = None,
+                        ):
+        """创建半长轴-距离关系密度图"""
+        self._create_jointplot_density(
+            df_at_t=binary_df_at_t,
+            simu_name=simu_name,
+            x_col='Distance_to_cluster_center[pc]',
+            y_col='Bin A[au]',
+            log_scale=(True, True),
+            filename_var_part='a_vs_distance',
+            extra_data_handler=extra_data_handler,
+            extra_ax_handler=extra_ax_handler,
+            custom_ax_joint_decorator=None
+        )
+    
+    def create_semi_distance_plot_jpg_compact_object_only(
+            self, binary_df_at_t, simu_name):
+        """创建仅包含致密天体的半长轴-距离关系图"""
+        self._create_base_jpg_plot_compact_object_only(
+            binary_df_at_t,
+            simu_name=simu_name,
+            x_col='Distance_to_cluster_center[pc]',
+            y_col='Bin A[au]',
+            log_scale=(True, True),
+            filename_var_part='a_vs_distance_compact_objects_only',
+            custom_ax_decorator=None
+        )
+
+    def create_bin_vx_x_plot_density(
+            self, binary_df_at_t, simu_name,
+            extra_data_handler: Callable | None = None,
+            extra_ax_handler: Callable | None = None,
+                        ):
+        """创建二元星系统的vx-x关系密度图"""
+        self._create_jointplot_density(
+            df_at_t=binary_df_at_t,
+            simu_name=simu_name,
+            x_col='Bin cm X [pc]',
+            y_col='Bin cm V1',
+            log_scale=(False, False),
+            filename_var_part='bin_vx_vs_x',
+            xlim_key='position_pc_lim',
+            ylim_key='velocity_kmps_lim',
+            extra_data_handler=extra_data_handler,
+            extra_ax_handler=self._symlogY_and_fill_handler,
+            custom_ax_joint_decorator=None
+        )
+
+    def create_bin_vx_x_plot_jpg_compact_object_only(
+            self, binary_df_at_t, simu_name):
+        """创建仅包含致密天体的vx-x关系图"""
+        self._create_base_jpg_plot_compact_object_only(
+            binary_df_at_t,
+            simu_name=simu_name,
+            x_col='Bin cm X [pc]',
+            y_col='Bin cm V1',
+            log_scale=(False, False),
+            xlim_key='position_pc_lim',
+            ylim_key='velocity_kmps_lim',
+            filename_var_part='bin_vx_vs_x_compact_objects_only',
+            extra_ax_handler=self._symlogY_and_fill_handler,
             custom_ax_decorator=None
         )
 
