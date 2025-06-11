@@ -639,7 +639,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             xlim_key='position_pc_lim', 
             ylim_key='velocity_kmps_lim', 
             extra_data_handler=extra_data_handler,
-            extra_ax_handler=self._symlogY_and_fill_handler,
+            extra_ax_handler=None,
             custom_ax_joint_decorator=None
         )
     
@@ -1222,7 +1222,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             xlim_key='position_pc_lim',
             ylim_key='velocity_kmps_lim',
             extra_data_handler=extra_data_handler,
-            extra_ax_handler=self._symlogY_and_fill_handler,
+            extra_ax_handler=None,
             custom_ax_joint_decorator=None
         )
 
@@ -1238,7 +1238,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             xlim_key='position_pc_lim',
             ylim_key='velocity_kmps_lim',
             filename_var_part='bin_vx_vs_x_compact_objects_only',
-            extra_ax_handler=self._symlogY_and_fill_handler,
+            extra_ax_handler=None,
             custom_ax_decorator=None
         )
 
