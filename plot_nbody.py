@@ -605,11 +605,10 @@ class BaseHDF5Visualizer(BaseVisualizer):
         # fill the linear region around 0
         ax.axhspan(-linthresh, linthresh, color='lightgray', alpha=0.3)
 
+
 class SingleStarVisualizer(BaseHDF5Visualizer):
     def create_mass_distance_plot_density(
             self, single_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None
             ):
         """创建质量-距离关系图"""
         self._create_jointplot_density(
@@ -619,15 +618,10 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             y_col='M',
             log_scale=(True, True),
             filename_var_part='mass_vs_distance_loglog',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
-            custom_ax_joint_decorator=None
         )
     
     def create_vx_x_plot_density(
             self, single_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None
             ):
         self._create_jointplot_density(
             df_at_t=single_df_at_t,
@@ -638,15 +632,10 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='allstar_vx_vs_x',
             xlim_key='position_pc_lim', 
             ylim_key='velocity_kmps_lim', 
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=None,
-            custom_ax_joint_decorator=None
         )
     
     def create_CMD_plot_density(
             self, single_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None
             ):
         def _custom_decorator(ax, df):
             ax.invert_xaxis()
@@ -657,8 +646,6 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             y_col='L*',
             log_scale=(True, True),
             filename_var_part='L_vs_Teff_loglog',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
             custom_ax_joint_decorator=_custom_decorator
         )
     
@@ -971,10 +958,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
                     )
 
     def create_mass_ratio_m1_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建质量比图"""
         self._create_jointplot_density(
             df_at_t=binary_df_at_t,
@@ -984,9 +968,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             log_scale=(True, True),
             xlim_key='M',
             filename_var_part='mass_ratio_vs_primary_mass_loglog',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
-            custom_ax_joint_decorator=None
         )
 
     def create_mass_ratio_m1_plot_jpg_compact_object_only(
@@ -1013,10 +994,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
         )
 
     def create_semi_m1_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建半长轴-主星质量图"""
         self._create_jointplot_density(
             df_at_t=binary_df_at_t,
@@ -1026,8 +1004,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             log_scale=(True, True),
             xlim_key='M',
             filename_var_part='a_vs_primary_mass_loglog',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
             custom_ax_joint_decorator=self._decorator_semi_m1
         )
 
@@ -1057,10 +1033,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             ax.text(xmax, 0.9, f'{soft_frac:.1%} soft\n{soft_num}', color='darkred', ha='right', va='top')
 
     def create_ebind_semi_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建绑定能-半长轴图"""
 
         self._create_jointplot_density(
@@ -1070,8 +1043,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='Ebind/kT',
             log_scale=(True, True),
             filename_var_part='ebind_vs_a_loglog',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
             custom_ax_joint_decorator=self._decorator_ebin_semi
         )
 
@@ -1089,10 +1060,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
         )
     
     def create_ecc_semi_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建偏心率-半长轴图"""
         self._create_jointplot_density(
             df_at_t=binary_df_at_t,
@@ -1101,9 +1069,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='Bin ECC',
             log_scale=(True, False),
             filename_var_part='ecc_vs_a', 
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
-            custom_ax_joint_decorator=None
         )
     
     def create_ecc_semi_plot_jpg_compact_object_only(
@@ -1115,7 +1080,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='Bin ECC',
             log_scale=(True, False),
             filename_var_part='ecc_vs_a_compact_objects_only',
-            custom_ax_decorator=None
         )
     
     def create_ecc_semi_plot_jpg_compact_object_only_loglog(
@@ -1127,7 +1091,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='Bin ECC',
             log_scale=(True, True),
             filename_var_part='ecc_vs_a_loglog_compact_objects_only',
-            custom_ax_decorator=None
         )
 
     def create_taugw_semi_plot_jpg_compact_object_only(
@@ -1139,14 +1102,10 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='tau_gw[Myr]',
             log_scale=(True, True),
             filename_var_part='taugw_vs_a_compact_objects_only',
-            custom_ax_decorator=None
         )
 
     def create_mtot_distance_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建总质量-距离关系密度图"""
         self._create_jointplot_density(
             df_at_t=binary_df_at_t,
@@ -1156,9 +1115,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             log_scale=(True, True),
             ylim_key='M',
             filename_var_part='mtot_vs_distance_loglog',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
-            custom_ax_joint_decorator=None
         )
 
     def create_mtot_distance_plot_jpg_compact_object_only(
@@ -1172,14 +1128,10 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             log_scale=(True, True),
             ylim_key='M',
             filename_var_part='mtot_vs_distance_loglog_compact_objects_only',
-            custom_ax_decorator=None
         )
 
     def create_semi_distance_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建半长轴-距离关系密度图"""
         self._create_jointplot_density(
             df_at_t=binary_df_at_t,
@@ -1188,9 +1140,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='Bin A[au]',
             log_scale=(True, True),
             filename_var_part='a_vs_distance',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=extra_ax_handler,
-            custom_ax_joint_decorator=None
         )
     
     def create_semi_distance_plot_jpg_compact_object_only(
@@ -1203,14 +1152,10 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             y_col='Bin A[au]',
             log_scale=(True, True),
             filename_var_part='a_vs_distance_compact_objects_only',
-            custom_ax_decorator=None
         )
 
     def create_bin_vx_x_plot_density(
-            self, binary_df_at_t, simu_name,
-            extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None,
-                        ):
+            self, binary_df_at_t, simu_name):
         """创建二元星系统的vx-x关系密度图"""
         self._create_jointplot_density(
             df_at_t=binary_df_at_t,
@@ -1221,9 +1166,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='bin_vx_vs_x',
             xlim_key='position_pc_lim',
             ylim_key='velocity_kmps_lim',
-            extra_data_handler=extra_data_handler,
-            extra_ax_handler=None,
-            custom_ax_joint_decorator=None
         )
 
     def create_bin_vx_x_plot_jpg_compact_object_only(
@@ -1238,8 +1180,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             xlim_key='position_pc_lim',
             ylim_key='velocity_kmps_lim',
             filename_var_part='bin_vx_vs_x_compact_objects_only',
-            extra_ax_handler=None,
-            custom_ax_decorator=None
         )
 
 
