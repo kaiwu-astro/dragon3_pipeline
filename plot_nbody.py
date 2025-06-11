@@ -599,11 +599,11 @@ class BaseHDF5Visualizer(BaseVisualizer):
         except NameError:
             plt.close(g.figure)
 
-    def _symlogY_and_fill_handler(ax, linthresh=1):
+    def _symlogY_and_fill_handler(self, ax, linthresh=10):
         # log scale，but linear region around 0
         ax.set_yscale('symlog', linthresh=linthresh)
         # fill the linear region around 0
-        ax.axvspan(-linthresh, linthresh, color='0.2')
+        ax.axhspan(-linthresh, linthresh, color='lightgray', alpha=0.3)
 
 class SingleStarVisualizer(BaseHDF5Visualizer):
     def create_mass_distance_plot_density(
@@ -1254,7 +1254,9 @@ class BaseContinousFileVisualizer(BaseVisualizer):
 
 
 class LagrVisualizer(BaseContinousFileVisualizer):
-    # metric: ['rlagr', 'rlagr_s', 'rlagr_b', 'avmass', 'nshell', 'vx', 'vy', 'vz', 'v', 'vr', 'vt', 'sigma2', 'sigma_r2', 'sigma_t2', 'vrot']
+    '''
+    所有lagr图默认每次都重绘，不考虑skip_existing_plot参数
+    '''
     def __init__(self, config_manager):
         super().__init__(config_manager)
         self.metric_to_plot_label = {
@@ -1302,6 +1304,7 @@ class LagrVisualizer(BaseContinousFileVisualizer):
                 plt.close(ax.figure)
         except NameError:
             plt.close(ax.figure)
+
     def _extra_ax_handler_rlagr(self, ax):
         ax.set(ylim=(ax.get_ylim()[0], 10.05))
 
@@ -1356,7 +1359,7 @@ class CollCoalVisualizer(BaseContinousFileVisualizer):
         )
 
         # fill x = 40 - 150 with pink
-        ax.fill_betweenx(y=ax.get_ylim(), x1=40, x2=150,  color='pink', alpha=0.3)
+        ax.fill_betweenx(y=ax.get_ylim(), x1=40, x2=150,  color='pink', alpha=0.2)
 
         ax.set(xscale='log', xlim=(2.5, 500), ylim=(0, 1.05))
         add_grid(ax)
@@ -1378,7 +1381,8 @@ class SimulationPlotter:
         self.config = config_manager
         self.hdf5_file_processor = HDF5FileProcessor(config_manager)
         self.lagr_file_processor = LagrFileProcessor(config_manager)
-        self.visualizer = HDF5Visualizer(config_manager)
+        self.hdf5_visualizer = HDF5Visualizer(config_manager)
+        self.lagr_visualizer = LagrVisualizer(config_manager)
 
     def plot_hdf5_snapshots(self, hdf5_snap_path, simu_name):
         """处理单个快照文件"""
@@ -1404,34 +1408,42 @@ class SimulationPlotter:
                 continue
             
             # 位置散点图
-            self.visualizer.single.create_position_plot_jpg(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_position_plot_jpg(single_df_at_t, simu_name)
             # 质量-距离关系图
-            self.visualizer.single.create_mass_distance_plot_density(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_mass_distance_plot_density(single_df_at_t, simu_name)
             # CMD图
-            self.visualizer.single.create_CMD_plot_density(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_CMD_plot_density(single_df_at_t, simu_name)
             # 彩色CMD图
-            self.visualizer.single.create_color_CMD_jpg(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_color_CMD_jpg(single_df_at_t, simu_name)
+            # 速度-位置
+            self.hdf5_visualizer.single.create_vx_x_plot_density(single_df_at_t, simu_name)
             
             # 双星
             if binary_df_at_t is not None and not binary_df_at_t.empty:
                 # 质量比-主星质量图
-                self.visualizer.binary.create_mass_ratio_m1_plot_density(binary_df_at_t, simu_name)
-                self.visualizer.binary.create_mass_ratio_m1_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_mass_ratio_m1_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_mass_ratio_m1_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
                 # 半长轴-主星质量图
-                self.visualizer.binary.create_semi_m1_plot_density(binary_df_at_t, simu_name)
-                self.visualizer.binary.create_semi_m1_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_semi_m1_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_semi_m1_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
                 # 偏心率-半长轴图
-                self.visualizer.binary.create_ecc_semi_plot_density(binary_df_at_t, simu_name)
-                self.visualizer.binary.create_ecc_semi_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
-                self.visualizer.binary.create_ecc_semi_plot_jpg_compact_object_only_loglog(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_ecc_semi_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_ecc_semi_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_ecc_semi_plot_jpg_compact_object_only_loglog(binary_df_at_t, simu_name)
                 # 绑定能-半长轴图
-                self.visualizer.binary.create_ebind_semi_plot_density(binary_df_at_t, simu_name)
-                self.visualizer.binary.create_ebind_semi_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_ebind_semi_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_ebind_semi_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
                 # GW时间-半长轴图
-                self.visualizer.binary.create_taugw_semi_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_taugw_semi_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
                 # 总质量-距离关系图
-                self.visualizer.binary.create_mtot_distance_plot_density(binary_df_at_t, simu_name)
-                self.visualizer.binary.create_mtot_distance_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_mtot_distance_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_mtot_distance_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                # 速度-位置
+                self.hdf5_visualizer.binary.create_bin_vx_x_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_bin_vx_x_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
+                # 半长轴-距离
+                self.hdf5_visualizer.binary.create_semi_distance_plot_density(binary_df_at_t, simu_name)
+                self.hdf5_visualizer.binary.create_semi_distance_plot_jpg_compact_object_only(binary_df_at_t, simu_name)
             
             # 清理内存
             plt.close('all')
@@ -1440,10 +1452,21 @@ class SimulationPlotter:
             if self.config.plot_only_first_step_in_hdf5:
                 break
 
+    def plot_lagr(self, simu_name):
+        l7df_sns = self.lagr_file_processor.load_sns_friendly_data(simu_name)
+        self.lagr_visualizer.create_lagr_radii_plot(l7df_sns, simu_name)
+        self.lagr_visualizer.create_lagr_avmass_plot(l7df_sns, simu_name)
+        self.lagr_visualizer.create_lagr_velocity_dispersion_plot(l7df_sns, simu_name)
+        plt.close('all')
+        gc.collect()
+
+
     def plot_all_simulations(self):
         """处理所有模拟"""
         for simu_name in self.config.pathof.keys():
-            
+            # 先画lagr
+            self.plot_lagr(simu_name)
+
             # 获取所有快照文件
             hdf5_snap_files = sorted(
                 glob(self.config.pathof[simu_name] + '/*.h5part'), 
