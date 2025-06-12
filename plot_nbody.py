@@ -708,6 +708,125 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             except NameError:
                 plt.close(ax.figure)
 
+    def create_position_plot_hightlight_compact_objects_jpg(
+            self, single_df_at_t, simu_name, 
+            filename_suffix: str | None = None,
+            extra_data_handler: Callable | None = None,
+            extra_ax_handler: Callable | None = None,
+            custom_ax_decorator: Callable | None = None
+            ):
+        ttot = single_df_at_t['TTOT'].iloc[0]
+        tmyr = single_df_at_t['Time[Myr]'].iloc[0]
+        t_over_tcr0 = single_df_at_t['TTOT/TCR0'].iloc[0]
+        t_over_trh0 = single_df_at_t['TTOT/TRH0'].iloc[0]
+
+        processed_df = single_df_at_t
+        if extra_data_handler is not None:
+            processed_df = extra_data_handler(single_df_at_t)
+
+        if filename_suffix is None:
+            save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2_highlight_compact_objects.jpg"
+        else:
+            save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2_highlight_compact_objects_{filename_suffix}.jpg"
+        
+        if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
+            print(f"Skip existing plot: {save_jpg_path}")
+            return
+
+        fig, ax = plt.subplots() # Normal white background by default
+
+        '''
+            10: "HeWD",
+            11: "COWD",
+            12: "ONeWD",
+            13: "NS",
+            14: "BH",
+        '''
+
+        # Filter data
+        df_hewd = processed_df[processed_df['KW'] == 10]
+        df_cowd = processed_df[processed_df['KW'] == 11]
+        df_onewd = processed_df[processed_df['KW'] == 12]
+        df_ns = processed_df[processed_df['KW'] == 13]
+        df_bh = processed_df[processed_df['KW'] == 14]
+        df_others = processed_df[~processed_df['KW'].isin([10, 11, 12, 13, 14])]
+
+        if not df_others.empty:
+            sns.scatterplot(
+                data=df_others,
+                x='X [pc]', y='Y [pc]', marker='o', lw=0,
+                s=np.sqrt(df_others['R*']), # Dynamic size based on R*
+                color='gray',
+                ax=ax
+            )
+
+        # Define plot configurations for different types of compact objects
+        # Each tuple: (DataFrame, marker_style, size, color, label, alpha, edge_color)
+        compact_object_plot_configs = [
+            (df_hewd, self.config.marker_nofill_list[10], 'blue',  'HeWD',  None   , 1.5),
+            (df_cowd, self.config.marker_nofill_list[11], 'blue',  'COWD',  None   , 1.5),
+            (df_onewd,self.config.marker_nofill_list[12], 'blue',  'ONeWD', None   , 1.5),
+            (df_ns,   self.config.marker_fill_list[13],   'red',   'NS',    'green', 0),
+            (df_bh,   self.config.marker_fill_list[14],   'black', 'BH',    'white', 0),
+        ]
+
+        for df_compact, marker, color, label, edgecolors, lw in compact_object_plot_configs:
+            if not df_compact.empty:
+                plot_kwargs = {
+                    'data': df_compact,
+                    'x': 'X [pc]', 
+                    'y': 'Y [pc]',
+                    'marker': marker,
+                    's': 30,
+                    'color': color,
+                    'label': label, # Note: legend is removed later in your code
+                    'alpha': 0.7,
+                    'edgecolors': edgecolors,
+                    'lw': lw,
+                    'ax': ax
+                }
+                # if edgecolors:
+                #     plot_kwargs['edgecolors'] = edgecolors
+                
+                sns.scatterplot(**plot_kwargs)
+        
+        if extra_ax_handler is not None:
+            extra_ax_handler(ax)
+
+        self.decorate_jointfig(
+            ax, processed_df, 'X [pc]', 'Y [pc]', 
+            self.config.limits['position_pc_lim'], self.config.limits['position_pc_lim'], 
+            simu_name, 
+            ttot, tmyr, t_over_tcr0, t_over_trh0
+        )
+        
+        if ax.legend_ is not None:
+            ax.legend_.remove()
+
+        if custom_ax_decorator is not None:
+            custom_ax_decorator(ax)
+
+        add_grid(ax)
+        fig.savefig(save_jpg_path, transparent=False) 
+        try:
+            __IPYTHON__
+            if self.config.close_figure_in_ipython:
+                plt.close(fig)
+        except NameError:
+            plt.close(fig)
+
+    def create_position_plot_hightlight_compact_objects_wide_pc_jpg(
+            self, single_df_at_t, simu_name):
+        def _set_wide_pos_lim_pc(ax):
+            ax.set_xlim(*self.config.limits['position_pc_lim_MAX'])
+            ax.set_ylim(*self.config.limits['position_pc_lim_MAX'])
+        self.create_position_plot_hightlight_compact_objects_jpg(
+            single_df_at_t=single_df_at_t,
+            simu_name=simu_name,
+            filename_suffix='wide_pc',
+            custom_ax_decorator=_set_wide_pos_lim_pc
+        )
+
     def create_color_CMD_jpg(
             self, single_df_at_t, simu_name,
             extra_data_handler: Callable | None = None,
@@ -1386,6 +1505,9 @@ class SimulationPlotter:
             
             # 位置散点图
             self.hdf5_visualizer.single.create_position_plot_jpg(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_position_plot_hightlight_compact_objects_jpg(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_position_plot_hightlight_compact_objects_wide_pc_jpg(single_df_at_t, simu_name)
+
             # 质量-距离关系图
             self.hdf5_visualizer.single.create_mass_distance_plot_density(single_df_at_t, simu_name)
             # CMD图
