@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 from nbody_tools import *
 import gc
+import sys
 import seaborn as sns
 import getopt
+import logging
 import functools
 import multiprocessing
 from typing import Callable, Optional
+try:
+    logger
+except NameError:
+    logger = logging.getLogger(__name__)
+    logger.addHandler(logging.StreamHandler(sys.stdout))
+    logger.setLevel(logging.DEBUG)
 
 def set_mpl_fonts():
     # check default： plt.rcParams
@@ -90,12 +98,12 @@ class ConfigManager:
         
         # 通用配置
         self.skip_until_of: dict = { # can change by command line
-            '0sb' : 0,
-            '20sb': 0,
+            '0sb' : 700,
+            '20sb': 60,
             '60sb': 0,
         }
         self.skip_existing_plot: bool = True
-        self.plot_only_first_step_in_hdf5: bool = False
+        self.plot_only_int_nbody_time: bool = True
         self.close_figure_in_ipython: bool = False
         self.processes_count: int = 40
         self.tasks_per_child: int = 3
@@ -148,9 +156,10 @@ class ConfigManager:
             'Teff*': (1e3, 1.05e6),
             'L*': (0.9e-5, 1e8),
             'position_pc_lim': (-15, 15),
+            'position_pc_lim_MAX': (-500, 500),
             'Ebind/kT': (2e-7, 5e2),
             'tau_gw[Myr]': (9, 14000),
-            'velocity_kmps_lim': (-2000, 2000),
+            'velocity_kmps_lim': (-200, 200),
         }
         self.colname_to_label = {
             'Distance_to_cluster_center[pc]': 'r [pc]',
@@ -194,6 +203,7 @@ class HDF5FileProcessor:
     def __init__(self, config_manager):
         self.config = config_manager
     
+    @log_time(logger)
     def read_file(self, hdf5_path, simu_name):
         """加载并预处理HDF5数据"""
         # print(f"\nProcessing {hdf5_path=}...")
@@ -297,10 +307,12 @@ class HDF5FileProcessor:
 
         return df_dict
     
+    @log_time(logger)
     def get_snapshot_time(self, hdf5_path):
         """从文件名中提取快照时间"""
         return int(hdf5_path.split('snap.40_')[1].split('.h5part')[0])
     
+    @log_time(logger)
     def get_snapshot_at_t(self, df_dict, ttot):
         """获取特定时间的数据"""
         single_df = df_dict['singles'][df_dict['singles']['TTOT'] == ttot].copy()
@@ -578,7 +590,7 @@ class BaseHDF5Visualizer(BaseVisualizer):
         save_jpg_path = f"{self.config.plot_dir}/jpg/{base_filename}.jpg"
 
         if self.config.skip_existing_plot and os.path.exists(save_pdf_path):
-            print(f"Skip existing plot: {save_pdf_path}")
+            logger.debug(f"Skip existing plot: {save_pdf_path}")
             return
 
         g = sns.jointplot(
@@ -625,6 +637,7 @@ class BaseHDF5Visualizer(BaseVisualizer):
 
 
 class SingleStarVisualizer(BaseHDF5Visualizer):
+    @log_time(logger)
     def create_mass_distance_plot_density(
             self, single_df_at_t, simu_name,
             ):
@@ -638,6 +651,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mass_vs_distance_loglog',
         )
     
+    @log_time(logger)
     def create_vx_x_plot_density(
             self, single_df_at_t, simu_name,
             ):
@@ -652,6 +666,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             ylim_key='velocity_kmps_lim', 
         )
     
+    @log_time(logger)
     def create_CMD_plot_density(
             self, single_df_at_t, simu_name,
             ):
@@ -667,6 +682,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=_custom_decorator
         )
     
+    @log_time(logger)
     def create_position_plot_jpg(
             self, single_df_at_t, simu_name,
             extra_data_handler: Callable | None = None,
@@ -681,7 +697,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2.jpg"
         """创建位置散点图"""
         if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
-            print(f"Skip existing plot: {save_jpg_path}")
+            logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
         color_rgb_darker = self.teff_to_rgb_converter.get_rgb(single_df_at_t['Teff*'].values) * \
             self.luminosity_to_plot_alpha(single_df_at_t['L*'].values)[:, np.newaxis]
@@ -708,6 +724,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             except NameError:
                 plt.close(ax.figure)
 
+    @log_time(logger)
     def create_position_plot_hightlight_compact_objects_jpg(
             self, single_df_at_t, simu_name, 
             filename_suffix: str | None = None,
@@ -730,7 +747,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2_highlight_compact_objects_{filename_suffix}.jpg"
         
         if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
-            print(f"Skip existing plot: {save_jpg_path}")
+            logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
 
         fig, ax = plt.subplots() # Normal white background by default
@@ -815,6 +832,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         except NameError:
             plt.close(fig)
 
+    @log_time(logger)
     def create_position_plot_hightlight_compact_objects_wide_pc_jpg(
             self, single_df_at_t, simu_name):
         def _set_wide_pos_lim_pc(ax):
@@ -827,6 +845,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             custom_ax_decorator=_set_wide_pos_lim_pc
         )
 
+    @log_time(logger)
     def create_color_CMD_jpg(
             self, single_df_at_t, simu_name,
             extra_data_handler: Callable | None = None,
@@ -840,7 +859,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             single_df_at_t = extra_data_handler(single_df_at_t)
         save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_CMD.jpg"
         if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
-            print(f"Skip existing plot: {save_jpg_path}")
+            logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
         all_stellar_types_sorted = sorted(
             self.config.kw_to_stellar_type_verbose.values(),
@@ -977,7 +996,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
 
         save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_{filename_var_part}.jpg"
         if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
-            print(f"Skip existing plot: {save_jpg_path}")
+            logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
         
         binary_df_at_t_cbo = self.binary_df_compact_object_filter(binary_df_at_t)
@@ -1068,6 +1087,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
         except NameError:
             plt.close(fig)
 
+    @log_time(logger)
     def binary_df_compact_object_filter(self, df):
         if 'KW' in df.columns:
             compact_object_mask = df['KW'].isin(self.config.compact_object_KW)
@@ -1077,11 +1097,13 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             raise ValueError("DataFrame does not contain 'KW' or 'Bin KW1/Bin KW2' columns. Columns: " + str(df.columns))
         return df[compact_object_mask]
     
+    @log_time(logger)
     def get_binary_cookie_dict(self, st1, st2):
         return self.get_binary_cookie_dict_num(
             self.config.stellar_type_to_kw[st1], 
             self.config.stellar_type_to_kw[st2])
 
+    @log_time(logger)
     def get_binary_cookie_dict_num(self, kw1, kw2):
         cookie_tastes = self.config.palette_st
         sts = self.config.kw_to_stellar_type[kw1] + '-' + self.config.kw_to_stellar_type[kw2]
@@ -1094,6 +1116,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
                     fillstyle=fs, ms=ms, alpha=0.6,
                     )
 
+    @log_time(logger)
     def create_mass_ratio_m1_plot_density(
             self, binary_df_at_t, simu_name):
         """创建质量比图"""
@@ -1107,6 +1130,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mass_ratio_vs_primary_mass_loglog',
         )
 
+    @log_time(logger)
     def create_mass_ratio_m1_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         self._create_base_jpg_plot_compact_object_only(
@@ -1130,6 +1154,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             horizontalalignment='right'
         )
 
+    @log_time(logger)
     def create_semi_m1_plot_density(
             self, binary_df_at_t, simu_name):
         """创建半长轴-主星质量图"""
@@ -1144,6 +1169,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=self._decorator_semi_m1
         )
 
+    @log_time(logger)
     def create_semi_m1_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         self._create_base_jpg_plot_compact_object_only(
@@ -1169,6 +1195,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             ax.text(xmax, 1.0, f'{hard_num}\n{hard_frac:.1%} hard', color='darkred', ha='right', va='bottom')
             ax.text(xmax, 0.9, f'{soft_frac:.1%} soft\n{soft_num}', color='darkred', ha='right', va='top')
 
+    @log_time(logger)
     def create_ebind_semi_plot_density(
             self, binary_df_at_t, simu_name):
         """创建绑定能-半长轴图"""
@@ -1183,6 +1210,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=self._decorator_ebin_semi
         )
 
+    @log_time(logger)
     def create_ebind_semi_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
 
@@ -1196,6 +1224,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             custom_ax_decorator=self._decorator_ebin_semi
         )
     
+    @log_time(logger)
     def create_ecc_semi_plot_density(
             self, binary_df_at_t, simu_name):
         """创建偏心率-半长轴图"""
@@ -1208,6 +1237,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='ecc_vs_a', 
         )
     
+    @log_time(logger)
     def create_ecc_semi_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         self._create_base_jpg_plot_compact_object_only(
@@ -1219,6 +1249,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='ecc_vs_a_compact_objects_only',
         )
     
+    @log_time(logger)
     def create_ecc_semi_plot_jpg_compact_object_only_loglog(
             self, binary_df_at_t, simu_name):
         self._create_base_jpg_plot_compact_object_only(
@@ -1230,6 +1261,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='ecc_vs_a_loglog_compact_objects_only',
         )
 
+    @log_time(logger)
     def create_taugw_semi_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         self._create_base_jpg_plot_compact_object_only(
@@ -1241,6 +1273,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='taugw_vs_a_compact_objects_only',
         )
 
+    @log_time(logger)
     def create_mtot_distance_plot_density(
             self, binary_df_at_t, simu_name):
         """创建总质量-距离关系密度图"""
@@ -1254,6 +1287,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mtot_vs_distance_loglog',
         )
 
+    @log_time(logger)
     def create_mtot_distance_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         """创建仅包含致密天体的总质量-距离关系图"""
@@ -1267,6 +1301,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mtot_vs_distance_loglog_compact_objects_only',
         )
 
+    @log_time(logger)
     def create_semi_distance_plot_density(
             self, binary_df_at_t, simu_name):
         """创建半长轴-距离关系密度图"""
@@ -1279,6 +1314,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='a_vs_distance',
         )
     
+    @log_time(logger)
     def create_semi_distance_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         """创建仅包含致密天体的半长轴-距离关系图"""
@@ -1291,6 +1327,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='a_vs_distance_compact_objects_only',
         )
 
+    @log_time(logger)
     def create_bin_vx_x_plot_density(
             self, binary_df_at_t, simu_name):
         """创建二元星系统的vx-x关系密度图"""
@@ -1305,6 +1342,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             ylim_key='velocity_kmps_lim',
         )
 
+    @log_time(logger)
     def create_bin_vx_x_plot_jpg_compact_object_only(
             self, binary_df_at_t, simu_name):
         """创建仅包含致密天体的vx-x关系图"""
@@ -1372,7 +1410,6 @@ class LagrVisualizer(BaseContinousFileVisualizer):
                     x='Time[Myr]', y='Value', hue='%')
         ax.set(
             yscale='log',
-            xscale='log',
             ylabel=self.metric_to_plot_label[metric],
             title=simu_name
             )
@@ -1493,9 +1530,11 @@ class SimulationPlotter:
         
         # 处理每个时间点
         for ttot in df_dict['scalars']['TTOT'].unique():
-            print(f"{ttot=}", end=' | ')
             if ttot < self.config.skip_until_of[simu_name]:
                 continue
+            if self.config.plot_only_int_nbody_time and not ttot.is_integer():
+                continue
+            print(f"{ttot=}", end=' | ')
             
             # 获取该时间点的数据
             single_df_at_t, binary_df_at_t, is_valid = self.hdf5_file_processor.get_snapshot_at_t(df_dict, ttot)
@@ -1514,8 +1553,9 @@ class SimulationPlotter:
             self.hdf5_visualizer.single.create_CMD_plot_density(single_df_at_t, simu_name)
             # 彩色CMD图
             self.hdf5_visualizer.single.create_color_CMD_jpg(single_df_at_t, simu_name)
-            # 速度-位置
-            self.hdf5_visualizer.single.create_vx_x_plot_density(single_df_at_t, simu_name)
+            # 速度-位置 # 不知为何非常非常慢，先不弄
+            # self.hdf5_visualizer.single.create_vx_x_plot_density(single_df_at_t, simu_name)
+
             
             # 双星
             if binary_df_at_t is not None and not binary_df_at_t.empty:
@@ -1548,9 +1588,6 @@ class SimulationPlotter:
             plt.close('all')
             gc.collect()
 
-            if self.config.plot_only_first_step_in_hdf5:
-                break
-
     def plot_lagr(self, simu_name):
         l7df_sns = self.lagr_file_processor.load_sns_friendly_data(simu_name)
         self.lagr_visualizer.create_lagr_radii_plot(l7df_sns, simu_name)
@@ -1571,6 +1608,10 @@ class SimulationPlotter:
                 glob(self.config.pathof[simu_name] + '/*.h5part'), 
                 key=lambda x: int(x.split('snap.40_')[1].split('.h5part')[0])
             )
+            # 如果最后一个快照的修改时间在24小时之内，则从列表中删除，避免读取一个正在跑的模拟
+            WAIT_SNAPSHOT_AGE_HOUR = 24
+            if hdf5_snap_files and os.path.getmtime(hdf5_snap_files[-1]) > time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600:
+                print(f"Last snapshot of {simu_name}: {hdf5_snap_files.pop()} is created within {WAIT_SNAPSHOT_AGE_HOUR}h, skipping it.")
             
             # 创建带固定参数的部分函数
             process_file_partial = functools.partial(
@@ -1593,11 +1634,13 @@ class SimulationPlotter:
 
 
 def main():
-    """主函数"""
-    # 初始化配置
     try:
-        long_options = ["skip-until="] 
+        long_options = ["skip-until=", '--debug'] 
         opts, args = getopt.getopt(sys.argv[1:], "k:", long_options)
+        if '--debug' in dict(opts):
+            logger.setLevel(logging.DEBUG)
+        else:
+            logger.setLevel(logging.INFO)
     except getopt.GetoptError as err:
         print(err) 
         sys.exit(2)
