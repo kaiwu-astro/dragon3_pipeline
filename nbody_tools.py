@@ -597,3 +597,16 @@ def transform_l7df_to_sns_friendly(df_physical_units):
     melted_df['%'] = melted_df['Percentage'].apply(percentage_present)
     
     return melted_df
+
+def log_time(logger):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            logger.debug(f"Function {func.__name__} started at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time))}")
+            result = func(*args, **kwargs)
+            end_time = time.time()
+            logger.debug(f"Function {func.__name__} finished at {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(end_time))}, took {end_time - start_time:.4f} seconds")
+            return result
+        return wrapper
+    return decorator
