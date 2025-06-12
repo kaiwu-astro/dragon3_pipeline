@@ -401,7 +401,25 @@ class LagrFileProcessor(ContinousFileProcessor):
         return l7df
     
     def load_sns_friendly_data(self, simu_name):
-        return transform_l7df_to_sns_friendly(self.read_file(simu_name))
+        l7df_sns = transform_l7df_to_sns_friendly(self.read_file(simu_name))
+        # 对于Metric = sigma2, sigma_r2, sigma_t2的，将值取平方根，新Metric = sigma, sigma_r, sigma_t
+        metrics_to_transform = ['sigma2', 'sigma_r2', 'sigma_t2']
+        new_rows = []
+        for metric_old in metrics_to_transform:
+            # 筛选出需要转换的行
+            df_subset = l7df_sns[l7df_sns['Metric'] == metric_old].copy()
+            if not df_subset.empty:
+                # 计算平方根
+                df_subset['Value'] = np.sqrt(df_subset['Value'])
+                # 更新 Metric 名称
+                metric_new = metric_old[:-1] # 去掉末尾的 '2'
+                df_subset['Metric'] = metric_new
+                new_rows.append(df_subset)
+        if new_rows:
+            # 将新数据添加到原 DataFrame
+            l7df_sns = pd.concat([l7df_sns, ] + new_rows, ignore_index=True)
+
+        return l7df_sns
 
 
 class _Coll_Coal_FileProcessor(ContinousFileProcessor):
@@ -1211,16 +1229,23 @@ class LagrVisualizer(BaseContinousFileVisualizer):
             'v': 'Mass weighted velocity [km/s]',
             'vr': 'Mass weighted radial velocity [km/s]',
             'vt': 'Mass weighted tangential velocity [km/s]',
-            'sigma2': 'Mass weighted velocity dispersion squared [km2/s2]',
-            'sigma_r2': 'Mass weighted radial velocity dispersion squared [km2/s2]',
-            'sigma_t2': 'Mass weighted tangential velocity dispersion [km2/s2]',
-            'vrot': 'Mass weighted rotational velocity [km2/s2]',
+            'sigma2': 'Mass weighted\nvelocity dispersion squared [${km}^2~s^{-2}$]',
+            'sigma': 'Mass weighted velocity dispersion [km/s]',
+            'sigma_r2': 'Mass weighted\nradial velocity dispersion squared [${km}^2~s^{-2}$]',
+            'sigma_r': 'Mass weighted radial velocity dispersion [km/s]',
+            'sigma_t2': 'Mass weighted\ntangential velocity dispersion squared [${km}^2~s^{-2}$]',
+            'sigma_t': 'Mass weighted tangential velocity dispersion [km/s]',
+            'vrot': 'Mass weighted\nrotational velocity [km/s]',
         }
 
     def create_lagr_plot_base(
-            self, l7df_sns, simu_name, metric='rlagr',
+            self, l7df_sns, simu_name, metric='rlagr', 
+            filename_suffix: str | None = None,
             extra_ax_handler: Callable | None = None):
-        save_pdf_path = f"{self.config.plot_dir}/{self.config.figname_prefix[simu_name]}_{metric}.pdf"
+        if filename_suffix is None:
+            save_pdf_path = f"{self.config.plot_dir}/{self.config.figname_prefix[simu_name]}_{metric}.pdf"
+        else:
+            save_pdf_path = f"{self.config.plot_dir}/{self.config.figname_prefix[simu_name]}_{metric}_{filename_suffix}.pdf"
         l7df_sns_selected_metric = l7df_sns[(l7df_sns['Metric'] == metric) & (l7df_sns['%'].isin(self.config.selected_lagr_percent))]
         # remove t=0 data
         l7df_sns_selected_metric = l7df_sns_selected_metric[l7df_sns_selected_metric['Time[Myr]'] > 0]
@@ -1248,16 +1273,28 @@ class LagrVisualizer(BaseContinousFileVisualizer):
     def _extra_ax_handler_rlagr(self, ax):
         ax.set(ylim=(ax.get_ylim()[0], 10.05))
 
+    def _extra_ax_handler_logx(self, ax):
+        ax.set_xscale('log')
+
+    def _extra_ax_handler_rlagr_logx(self, ax):
+        self._extra_ax_handler_rlagr(ax)
+        self._extra_ax_handler_logx(ax)
+
     def create_lagr_radii_plot(self, l7df_sns, simu_name):
         self.create_lagr_plot_base(
             l7df_sns, simu_name, metric='rlagr',
             extra_ax_handler=self._extra_ax_handler_rlagr)
+        self.create_lagr_plot_base(
+            l7df_sns, simu_name, metric='rlagr', filename_suffix='loglog',
+            extra_ax_handler=self._extra_ax_handler_rlagr_logx)
     
     def create_lagr_avmass_plot(self, l7df_sns, simu_name):
         self.create_lagr_plot_base(l7df_sns, simu_name, metric='avmass')
+        self.create_lagr_plot_base(l7df_sns, simu_name, metric='avmass', filename_suffix='loglog', extra_ax_handler=self._extra_ax_handler_logx)
     
     def create_lagr_velocity_dispersion_plot(self, l7df_sns, simu_name):
-        self.create_lagr_plot_base(l7df_sns, simu_name, metric='sigma2')
+        self.create_lagr_plot_base(l7df_sns, simu_name, metric='sigma')
+        self.create_lagr_plot_base(l7df_sns, simu_name, metric='sigma', filename_suffix='loglog', extra_ax_handler=self._extra_ax_handler_logx)
 
 
 class CollCoalVisualizer(BaseContinousFileVisualizer):
