@@ -193,7 +193,7 @@ class ConfigManager:
                     _get_time = lambda x: float(x.split('ttot_')[1].split('_')[0])
                     all_times = np.array([_get_time(x) for x in all_pdf_plots])
                     self.skip_until_of[simu_name] = all_times.max()
-                    print(f"[{simu_name}] Get skip-until={self.skip_until_of[simu_name]}")
+                    logger.info(f"[{simu_name}] Get skip-until={self.skip_until_of[simu_name]}")
                 else:
                     self.skip_until_of[simu_name] = 0
 
@@ -206,7 +206,7 @@ class HDF5FileProcessor:
     @log_time(logger)
     def read_file(self, hdf5_path, simu_name):
         """加载并预处理HDF5数据"""
-        # print(f"\nProcessing {hdf5_path=}...")
+        logger.debug(f"\nProcessing {hdf5_path=}...")
         
         # 获取数据框
         df_dict = dataframes_from_hdf5_file(hdf5_path)
@@ -341,11 +341,11 @@ class ContinousFileProcessor:
         gather_file_cmd = f'cd {self.config.pathof[simu_name]};' + \
         f'''tmpf=`mktemp --suffix=.{self.file_basename}`; ls -tr {self.file_basename}* | xargs cat > $tmpf; echo $tmpf'''
         self.file_path = get_output(gather_file_cmd)[0]
-        print(f'Gathered {self.file_basename} of {simu_name} files into {self.file_path}')
+        logger.debug(f'Gathered {self.file_basename} of {simu_name} files into {self.file_path}')
     
     def read_file(self, simu_name):
         self.concat_file(simu_name)
-        print(f'Loading gathered self.file_basename at {self.file_path}')
+        logger.debug(f'Loading gathered self.file_basename at {self.file_path}')
         raise NotImplementedError("子类必须实现此方法")
     
     def clean_data(self, df, timecol='TIME[NB]'):
@@ -356,7 +356,7 @@ class ContinousFileProcessor:
         is_forwarding = np.array([df[timecol][:i+1].max() == v for i, v in df[timecol].items()])
         # print number of False = data to remove
         if not is_forwarding.all():
-            print(f"[{self.file_basename}] Warning: Found {len(is_forwarding) - is_forwarding.sum()} descending entries in {timecol}, removing")
+            logger.warning(f"[{self.file_basename}] Warning: Found {len(is_forwarding) - is_forwarding.sum()} descending entries in {timecol}, removing")
         return df[is_forwarding].reset_index(drop=True)
 
     def compact_object_filter(self, df, col1, col2=None):
@@ -394,7 +394,7 @@ class LagrFileProcessor(ContinousFileProcessor):
     
     def read_file(self, simu_name):
         self.concat_file(simu_name)
-        print(f'Loading gathered {self.file_basename} of {simu_name} at {self.file_path}')
+        logger.debug(f'Loading gathered {self.file_basename} of {simu_name} at {self.file_path}')
         l7df = read_lagr_7(self.file_path)
         l7df = self.clean_data(l7df)
         l7df = l7df_to_physical_units(l7df, self.get_scale_dict_from_stdout(simu_name))
@@ -408,7 +408,7 @@ class LagrFileProcessor(ContinousFileProcessor):
         """
         duplicated_times = l7df['Time[NB]'].duplicated(keep=False)
         if duplicated_times.any():
-            print("[lagr.7] Warning: Duplicate 'Time[NB]' detected at Time[NB] = ", l7df['Time[NB]'][duplicated_times].unique(), 'using the last occurrence')
+            logger.warning("[lagr.7] Warning: Duplicate 'Time[NB]' detected at Time[NB] = ", l7df['Time[NB]'][duplicated_times].unique(), 'using the last occurrence')
             l7df = l7df.loc[l7df['Time[NB]'].duplicated(keep='last') | ~duplicated_times]
         return l7df
     
@@ -438,7 +438,7 @@ class _Coll_Coal_FileProcessor(ContinousFileProcessor):
     """读取和画图前预处理coll.13和coal.24"""
     def read_file(self, simu_name, read_csv_func: Callable):
         self.concat_file(simu_name)
-        print(f'Loading gathered {self.file_basename} of {simu_name} at {self.file_path}')
+        logger.debug(f'Loading gathered {self.file_basename} of {simu_name} at {self.file_path}')
         df = read_csv_func(self.file_path)
         df = self.clean_data(df)
         df.insert(
@@ -1522,7 +1522,7 @@ class SimulationPlotter:
         # 获取快照时间
         t_nbody_in_filename = self.hdf5_file_processor.get_snapshot_time(hdf5_snap_path)
         if t_nbody_in_filename < self.config.skip_until_of[simu_name]:
-            # print("skipped")
+            logger.debug("skipped")
             return
         
         # 加载数据
@@ -1534,12 +1534,12 @@ class SimulationPlotter:
                 continue
             if self.config.plot_only_int_nbody_time and not ttot.is_integer():
                 continue
-            print(f"{ttot=}", end=' | ')
+            logger.debug(f"{ttot=}", end=' | ')
             
             # 获取该时间点的数据
             single_df_at_t, binary_df_at_t, is_valid = self.hdf5_file_processor.get_snapshot_at_t(df_dict, ttot)
             if not is_valid:
-                print(f"Warning: {simu_name} {hdf5_snap_path} {ttot=} data validation failed, skipping")
+                logger.info(f"Warning: {simu_name} {hdf5_snap_path} {ttot=} data validation failed, skipping")
                 continue
             
             # 位置散点图
@@ -1611,7 +1611,7 @@ class SimulationPlotter:
             # 如果最后一个快照的修改时间在24小时之内，则从列表中删除，避免读取一个正在跑的模拟
             WAIT_SNAPSHOT_AGE_HOUR = 24
             if hdf5_snap_files and os.path.getmtime(hdf5_snap_files[-1]) > time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600:
-                print(f"Last snapshot of {simu_name}: {hdf5_snap_files.pop()} is created within {WAIT_SNAPSHOT_AGE_HOUR}h, skipping it.")
+                logger.info(f"Last snapshot of {simu_name}: {hdf5_snap_files.pop()} is created within {WAIT_SNAPSHOT_AGE_HOUR}h, skipping it.")
             
             # 创建带固定参数的部分函数
             process_file_partial = functools.partial(
