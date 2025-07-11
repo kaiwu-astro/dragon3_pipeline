@@ -4,7 +4,7 @@ set -e
 # 记录总开始时间
 total_start_time=$(date +%s)
 
-PLOT_DIR='~/scratch/plot/jpg' # jpg图片所在的目录
+PLOT_DIR="$HOME/scratch/plot/jpg" # jpg图片所在的目录
 MAX_PARALLEL_JOBS=15
 module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2 
 
@@ -61,6 +61,13 @@ plot_patterns=(
     "_taugw_vs_a_compact_objects_only.jpg"
     "_mtot_vs_distance_loglog.jpg"
     "_mtot_vs_distance_loglog_compact_objects_only.jpg"
+    # "_allstar_vx_vs_x.jpg"
+    "_bin_vx_vs_x.jpg"
+    "_bin_vx_vs_x_compact_objects_only.jpg"
+    "_a_vs_distance.jpg"
+    "_a_vs_distance_compact_objects_only.jpg"
+    "_x1_vs_x2_highlight_compact_objects.jpg"
+    "_x1_vs_x2_highlight_compact_objects_wide_pc.jpg"
 )
 
 cd $PLOT_DIR || { echo "Failed to change directory to $PLOT_DIR"; exit 1; }
@@ -82,7 +89,7 @@ process_video() {
     echo "Making video for $simu_name_pattern $plot_pattern with $quality_params"
     echo "======================================================"
     list_file="${simu_name_pattern}${plot_pattern}.txt"
-    ls *"${simu_name_pattern}"*"${plot_pattern}" | make_ffmpeg_list -k 7 > "$list_file"
+    ls *"${simu_name_pattern}"*.0"${plot_pattern}" | make_ffmpeg_list -k 7 > "$list_file" #*.0 = 只考虑整的nbody时间。后续需要做成命令行参数
     output_name="${simu_name_pattern}${plot_pattern}.mp4"
     rm -f "$output_name"
     

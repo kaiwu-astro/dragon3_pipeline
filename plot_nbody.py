@@ -685,8 +685,11 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
     @log_time(logger)
     def create_position_plot_jpg(
             self, single_df_at_t, simu_name,
+            filename_suffix: str | None = None,
             extra_data_handler: Callable | None = None,
-            extra_ax_handler: Callable | None = None
+            extra_ax_handler: Callable | None = None,
+            custom_ax_decorator: Callable | None = None,
+            uniform_color_and_size: bool = False
             ):
         ttot = single_df_at_t['TTOT'].iloc[0]
         tmyr = single_df_at_t['Time[Myr]'].iloc[0]
@@ -694,19 +697,28 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         t_over_trh0 = single_df_at_t['TTOT/TRH0'].iloc[0]
         if extra_data_handler is not None:
             single_df_at_t = extra_data_handler(single_df_at_t)
-        save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2.jpg"
+        if filename_suffix is None:
+            save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2.jpg"
+        else:
+            save_jpg_path = f"{self.config.plot_dir}/jpg/{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_x1_vs_x2_{filename_suffix}.jpg"
         """创建位置散点图"""
         if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
             logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
         color_rgb_darker = self.teff_to_rgb_converter.get_rgb(single_df_at_t['Teff*'].values) * \
             self.luminosity_to_plot_alpha(single_df_at_t['L*'].values)[:, np.newaxis]
+        if not uniform_color_and_size:
+            size = np.sqrt(single_df_at_t['R*'])
+            color = color_rgb_darker
+        else: # mostly for tidal tail visualization
+            size = 10
+            color = 'white' 
         with plt.style.context('dark_background'):
             ax = sns.scatterplot(
                 data=single_df_at_t, 
                 x='X [pc]', y='Y [pc]', marker='.', lw=0,
-                s=np.sqrt(single_df_at_t['R*']),
-                color=color_rgb_darker
+                s=size,
+                color=color
             )
             if extra_ax_handler is not None:
                 extra_ax_handler(ax)
@@ -716,6 +728,8 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
                 simu_name, 
                 ttot, tmyr, t_over_tcr0, t_over_trh0
             )
+            if custom_ax_decorator is not None:
+                custom_ax_decorator(ax)
             ax.figure.savefig(save_jpg_path, transparent=False)
             try:
                 __IPYTHON__
@@ -723,6 +737,22 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
                     plt.close(ax.figure)
             except NameError:
                 plt.close(ax.figure)
+
+    @log_time(logger)
+    def create_position_plot_wide_pc_jpg(
+            self, single_df_at_t, simu_name,
+            ):
+        def _set_wide_pos_lim_pc(ax):
+            ax.set_xlim(*self.config.limits['position_pc_lim_MAX'])
+            ax.set_ylim(*self.config.limits['position_pc_lim_MAX'])
+
+        self.create_position_plot_jpg(
+            single_df_at_t=single_df_at_t,
+            simu_name=simu_name,
+            filename_suffix='wide_pc',
+            custom_ax_decorator=_set_wide_pos_lim_pc,
+            uniform_color_and_size=True
+        )
 
     @log_time(logger)
     def create_position_plot_hightlight_compact_objects_jpg(
