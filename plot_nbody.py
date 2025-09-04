@@ -14,6 +14,10 @@ except NameError:
     logger = logging.getLogger(__name__)
     logger.addHandler(logging.StreamHandler(sys.stdout))
     logger.setLevel(logging.DEBUG)
+try:
+    import petar
+except ImportError:
+    logger.warning('Petar module not found.')
 
 def set_mpl_fonts():
     # check default： plt.rcParams
@@ -79,14 +83,14 @@ class ConfigManager:
     def __init__(self, opts=[]):
         # 路径配置
         self.pathof = {
-            '0sb' : '/p/scratch/madnuc/wu13/mar17-dragon3-start/0softBinary-5hardBinary',
+            '0sb' : '/p/scratch/madnuc/wu13/mar17-dragon3-start/00softBinary-5hardBinary',
             '20sb': '/p/scratch/madnuc/wu13/mar17-dragon3-start/20softBinary-5hardBinary',
             '60sb': '/p/scratch/madnuc/wu13/mar17-dragon3-start/60softBinary-5hardBinary',
         }
         self.input_file_path_of = {
-            '0sb' : self.pathof['0sb'] + '/N1m-Dragon3.inp',
-            '20sb': self.pathof['20sb'] + '/N1m-Dragon3.inp',
-            '60sb': self.pathof['60sb'] + '/N1m-Dragon3.inp',
+            '0sb' : self.pathof['0sb'] + '/N1m-Dragon3.inp.init',
+            '20sb': self.pathof['20sb'] + '/N1m-Dragon3.inp.init',
+            '60sb': self.pathof['60sb'] + '/N1m-Dragon3.inp.init',
         }
         # plot_file_prefix
         self.figname_prefix = {
@@ -204,13 +208,16 @@ class HDF5FileProcessor:
         self.config = config_manager
     
     @log_time(logger)
-    def read_file(self, hdf5_path, simu_name):
-        """加载并预处理HDF5数据"""
+    def read_file(self, hdf5_path, simu_name=None, N0=None):
+        """加载并预处理HDF5数据. 
+            simu_name：用于获取初始条件文件路径，读取N0
+            也可simu_name=None，改为直接传入N0"""
         logger.debug(f"\nProcessing {hdf5_path=}...")
         
         # 获取数据框
         df_dict = dataframes_from_hdf5_file(hdf5_path)
-        N0 = int(get_valueStr_of_namelist_key(path=self.config.input_file_path_of[simu_name], key='N'))
+        if N0 is None:
+            N0 = int(get_valueStr_of_namelist_key(path=self.config.input_file_path_of[simu_name], key='N'))
 
         # 预处理标量数据
         scalar_df_all = df_dict['scalars']
@@ -334,12 +341,12 @@ class ContinousFileProcessor:
         self.config = config_manager
         self.file_basename = file_basename
         self.file_path = None
-        self.firstjob = None
-        self.scale_dict = None
+        self.firstjobof = {}
+        self.scale_dict_of = {}
 
     def concat_file(self, simu_name):
         gather_file_cmd = f'cd {self.config.pathof[simu_name]};' + \
-        f'''tmpf=`mktemp --suffix=.{self.file_basename}`; ls -tr {self.file_basename}* | xargs cat > $tmpf; echo $tmpf'''
+        f'''tmpf=`mktemp --suffix=.{self.file_basename}`; find . -name '{self.file_basename}*' | xargs ls | xargs cat > $tmpf; echo $tmpf'''
         self.file_path = get_output(gather_file_cmd)[0]
         logger.debug(f'Gathered {self.file_basename} of {simu_name} files into {self.file_path}')
     
@@ -370,21 +377,22 @@ class ContinousFileProcessor:
 
     def firstjobhere(self, simu_name):
         '''同shell命令，返回jobid。自带缓存机制'''
-        if self.firstjob is None:
+        if simu_name not in self.firstjobof.keys():
             get_firstj_cmd = f'cd {self.config.pathof[simu_name]};' + \
-            r'''ls N*.[0-9]*.out 2> /dev/null | sed -E "s/.*\.([0-9]+)\.out/\1/" | sort -n | sed -n "1p"'''
-            self.firstjob = get_output(get_firstj_cmd)[-1]
-        return self.firstjob
+            r'''ls | grep -E '^[0-9]+$' | sort -n | head -n 1'''
+            self.firstjobof[simu_name] = get_output(get_firstj_cmd)[-1]
+        return self.firstjobof[simu_name]
     firstj = firstjobhere
     
     def get_scale_dict_from_stdout(self, simu_name):
         """
         从stdout中提取缩放字典。自带缓存机制
         """
-        if self.scale_dict is None:
-            first_output_file_path = glob(self.config.pathof[simu_name] + '/' + f'N*{self.firstj(simu_name)}*out')[0]
-            self.scale_dict = get_scale_dict(first_output_file_path)
-        return self.scale_dict
+        if simu_name not in self.scale_dict_of:
+            first_output_file_path = glob(self.config.pathof[simu_name] + '/' + self.firstj(simu_name) + '/N*out')[0]
+            self.scale_dict_of[simu_name] = get_scale_dict(first_output_file_path)
+            print(f'Got {self.scale_dict_of[simu_name]} from {first_output_file_path}')
+        return self.scale_dict_of[simu_name]
     
 
 class LagrFileProcessor(ContinousFileProcessor):
@@ -402,14 +410,31 @@ class LagrFileProcessor(ContinousFileProcessor):
     
     def clean_data(self, l7df):
         """
-        可能因为模拟重跑而造成某个'Time[NB]'有多个输出，会造成画图时出错
-        检测有多个行的相同'Time[NB]'，gather，然后发出一次警告
-        然后统一采用每个'Time[NB]'最后一行数据（因为极端情况下输出一半就abort，导致前面行不完整）
+        1) 丢弃包含非数值型数据的行（应全为 int/float）
+           规则：对整表执行 to_numeric(errors='coerce')，若某单元格原本非 NaN，
+           转换后为 NaN，则视为该单元格非数值；含此类单元格的整行剔除。
+        2) 处理 'Time[NB]' 的重复：保留最后一次出现（避免中途中断导致的不完整行）。
         """
-        duplicated_times = l7df['Time[NB]'].duplicated(keep=False)
-        if duplicated_times.any():
-            logger.warning("[lagr.7] Warning: Duplicate 'Time[NB]' detected at Time[NB] = ", l7df['Time[NB]'][duplicated_times].unique(), 'using the last occurrence')
-            l7df = l7df.loc[l7df['Time[NB]'].duplicated(keep='last') | ~duplicated_times]
+        # Step 1: drop rows with non-numeric cells
+        numeric_df = l7df.apply(pd.to_numeric, errors='coerce')
+        non_numeric_mask = (numeric_df.isna() & l7df.notna()).any(axis=1)
+        if non_numeric_mask.any():
+            if 'Time[NB]' in l7df.columns:
+                bad_times = np.unique(l7df.loc[non_numeric_mask, 'Time[NB]'].values)
+                logger.warning(f"[lagr.7] Warning: Found non-numeric entries; dropping {non_numeric_mask.sum()} rows at Time[NB]={bad_times}")
+            else:
+                logger.warning(f"[lagr.7] Warning: Found non-numeric entries; dropping {non_numeric_mask.sum()} rows (no 'Time[NB]' column)")
+        l7df = numeric_df.loc[~non_numeric_mask].copy()
+
+        # Step 2: de-duplicate on Time[NB], keep last
+        if 'Time[NB]' in l7df.columns:
+            duplicated_times = l7df['Time[NB]'].duplicated(keep=False)
+            if duplicated_times.any():
+                dup_vals = np.unique(l7df.loc[duplicated_times, 'Time[NB]'].values)
+                logger.warning(f"[lagr.7] Warning: Duplicate 'Time[NB]' detected at {dup_vals}; using the last occurrence")
+                l7df = l7df.loc[l7df['Time[NB]'].duplicated(keep='last') | ~duplicated_times]
+        else:
+            logger.warning("[lagr.7] Warning: 'Time[NB]' column not found when de-duplicating.")
         return l7df
     
     def load_sns_friendly_data(self, simu_name):
@@ -484,6 +509,30 @@ class Coal24FileProcessor(_Coll_Coal_FileProcessor):
         df['Merger_type'] = 'coalescence'
         return df
 
+
+class PeTarDataFileProcessor:
+    """读取和画图前预处理petar data.x"""
+    def __init__(self, config_manager):
+        self.config = config_manager
+
+    @log_time(logger)
+    def read_file(self, data_path, simu_name):
+        """加载petar.dat数据"""
+        logger.debug(f'\nProcessing {data_path=}...')
+        binary_path = data_path + '.binary'
+        if not os.path.exists(binary_path):
+            logger.error(f"Binary data file {binary_path} does not exist. Need to run `petar.data.process` first.")
+            return None
+        header = petar.PeTarDataHeader(data_path, snapshot_format='binary', external_mode='galpy')
+        logger.debug('Time',header.time, '\nN',header.n, '\nFile ID',header.file_id)
+        logger.debug('Center position:',header.pos_offset, '\nCenter velocity:', header.vel_offset)
+        single = petar.Particle(interrupt_mode='bse', external_mode='galpy') # here single means all star
+        binary = petar.Binary(member_particle_type=petar.Particle, G=petar.G_MSUN_PC_MYR)
+        single.fromfile(data_path, offset=petar.HEADER_OFFSET_WITH_CM) # for BINARY format. +galpy -> +with_cm 
+        binary.loadtxt(binary_path, skiprows=1)
+
+        # scalar df need to construct
+        
 
 class BaseVisualizer:
     """可视化类，处理所有绘图功能"""
@@ -1635,7 +1684,7 @@ class SimulationPlotter:
 
             # 获取所有快照文件
             hdf5_snap_files = sorted(
-                glob(self.config.pathof[simu_name] + '/*.h5part'), 
+                glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
                 key=lambda x: int(x.split('snap.40_')[1].split('.h5part')[0])
             )
             # 如果最后一个快照的修改时间在24小时之内，则从列表中删除，避免读取一个正在跑的模拟
