@@ -164,6 +164,8 @@ class ConfigManager:
             'Ebind/kT': (2e-7, 5e2),
             'tau_gw[Myr]': (9, 14000),
             'velocity_kmps_lim': (-200, 200),
+            'sum_of_radius[au]': (1e-7, 1),
+            'peri[au]': (1e-4, 1e5),
         }
         self.colname_to_label = {
             'Distance_to_cluster_center[pc]': 'r [pc]',
@@ -274,6 +276,9 @@ class HDF5FileProcessor:
         binary_df_all['Stellar Type'] = binary_df_all['primary_stellar_type'].map(self.config.kw_to_stellar_type) + '-' + \
             binary_df_all['secondary_stellar_type'].map(self.config.kw_to_stellar_type)
         # Ebind_abs = G * M1 * M2 / 2a / (M1 + M2)
+        binary_df_all['peri[au]'] = binary_df_all['Bin A[au]'] * (1 - binary_df_all['Bin ECC'])
+        binary_df_all['sum_of_radius[solar]'] = binary_df_all['Bin RS1*'] + binary_df_all['Bin RS2*']
+        binary_df_all['sum_of_radius[au]'] = binary_df_all['sum_of_radius[solar]'] * u.solRad.to(u.au)
         binary_df_all['Ebind_abs_NBODY'] = \
              binary_df_all['Bin M1*'] / scale_dict['m']         \
                 * binary_df_all['Bin M2*'] / scale_dict['m']     \
@@ -1434,6 +1439,21 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             xlim_key='position_pc_lim',
             ylim_key='velocity_kmps_lim',
             filename_var_part='bin_vx_vs_x_compact_objects_only',
+        )
+    
+    # def _ax_handler_peri_r1r2(self, ax):
+    #     # 画一条x=y的线，在
+
+    def create_bin_peri_r1r2_plot_density(
+            self, binary_df_at_t, simu_name):
+        """创建近星点距离-半径之和关系密度图"""
+        self._create_jointplot_density(
+            df_at_t=binary_df_at_t,
+            simu_name=simu_name,
+            x_col='sum_of_radius[au]',
+            y_col='peri[au]',
+            log_scale=(True, True),
+            filename_var_part='peri_vs_r1r2_loglog',
         )
 
 
