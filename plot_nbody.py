@@ -1526,13 +1526,27 @@ class LagrVisualizer(BaseContinousFileVisualizer):
             plt.close(ax.figure)
 
     def _extra_ax_handler_rlagr(self, ax):
-        ax.set(ylim=(ax.get_ylim()[0], 10.05))
+        ax.set(ylim=(4e-2, 20))
+
+    def _extra_ax_handler_avmass(self, ax):
+        ax.set(ylim=(0.3, 30))
+
+    def _extra_ax_handler_sigma(self, ax):
+        ax.set(ylim=(1e1, 1e15))
 
     def _extra_ax_handler_logx(self, ax):
         ax.set_xscale('log')
 
     def _extra_ax_handler_rlagr_logx(self, ax):
         self._extra_ax_handler_rlagr(ax)
+        self._extra_ax_handler_logx(ax)
+    
+    def _extra_ax_handler_avmass_logx(self, ax):
+        self._extra_ax_handler_avmass(ax)
+        self._extra_ax_handler_logx(ax)
+
+    def _extra_ax_handler_sigma_logx(self, ax):
+        self._extra_ax_handler_sigma(ax)
         self._extra_ax_handler_logx(ax)
 
     def create_lagr_radii_plot(self, l7df_sns, simu_name):
@@ -1544,12 +1558,16 @@ class LagrVisualizer(BaseContinousFileVisualizer):
             extra_ax_handler=self._extra_ax_handler_rlagr_logx)
     
     def create_lagr_avmass_plot(self, l7df_sns, simu_name):
-        self.create_lagr_plot_base(l7df_sns, simu_name, metric='avmass')
-        self.create_lagr_plot_base(l7df_sns, simu_name, metric='avmass', filename_suffix='loglog', extra_ax_handler=self._extra_ax_handler_logx)
+        self.create_lagr_plot_base(
+            l7df_sns, simu_name, metric='avmass',
+            extra_ax_handler=self._extra_ax_handler_avmass)
+        self.create_lagr_plot_base(l7df_sns, simu_name, metric='avmass', filename_suffix='loglog', extra_ax_handler=self._extra_ax_handler_avmass_logx)
     
     def create_lagr_velocity_dispersion_plot(self, l7df_sns, simu_name):
-        self.create_lagr_plot_base(l7df_sns, simu_name, metric='sigma')
-        self.create_lagr_plot_base(l7df_sns, simu_name, metric='sigma', filename_suffix='loglog', extra_ax_handler=self._extra_ax_handler_logx)
+        self.create_lagr_plot_base(
+            l7df_sns, simu_name, metric='sigma',
+            extra_ax_handler=self._extra_ax_handler_sigma)
+        self.create_lagr_plot_base(l7df_sns, simu_name, metric='sigma', filename_suffix='loglog', extra_ax_handler=self._extra_ax_handler_sigma_logx)
 
 
 class CollCoalVisualizer(BaseContinousFileVisualizer):
@@ -1743,6 +1761,13 @@ def main():
     except getopt.GetoptError as err:
         print(err) 
         sys.exit(2)
+
+    warnings.filterwarnings(
+        "ignore",
+        message=r".*multi-threaded, use of fork\(\) may lead to deadlocks.*",
+        category=DeprecationWarning,
+        module="multiprocessing.popen_fork",
+    )
 
     config = ConfigManager(opts)
     
