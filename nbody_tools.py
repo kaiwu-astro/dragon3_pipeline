@@ -27,12 +27,15 @@ import pandas as pd
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import colour
-from colour.colorimetry import SpectralDistribution, msds_to_XYZ, planck_law
-from colour.models import XYZ_to_sRGB
 from pandas.api.types import is_list_like
 from scipy.interpolate import interp1d
 from scipy.io import FortranFile
 from tqdm.auto import tqdm
+try:
+    from colour.colorimetry import SpectralDistribution, msds_to_XYZ, planck_law
+    from colour.models import XYZ_to_sRGB
+except:
+    pass
 
 pc_to_AU = constants.pc.to(u.AU).value
 
