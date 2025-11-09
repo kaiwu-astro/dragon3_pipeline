@@ -339,6 +339,16 @@ class HDF5FileProcessor:
             return None, None, False
         
         return single_df, binary_df, True
+    
+    def get_compact_object_mask(self, df):
+        """获取双星中包含致密天体的掩码"""
+        if 'KW' in df.columns: # singles
+            compact_object_mask = df['KW'].isin(self.config.compact_object_KW)
+        elif 'Bin KW1' in df.columns and 'Bin KW2' in df.columns: # binaries
+            compact_object_mask = df['Bin KW1'].isin(self.config.compact_object_KW) | df['Bin KW2'].isin(self.config.compact_object_KW)
+        else:
+            raise ValueError("DataFrame does not contain 'KW' or 'Bin KW1/Bin KW2' columns. Columns: " + str(df.columns))
+        return compact_object_mask
 
 
 class ContinousFileProcessor:
@@ -370,15 +380,6 @@ class ContinousFileProcessor:
         if not is_forwarding.all():
             logger.warning(f"[{self.file_basename}] Warning: Found {len(is_forwarding) - is_forwarding.sum()} descending entries in {timecol}, removing")
         return df[is_forwarding].reset_index(drop=True)
-
-    def compact_object_filter(self, df, col1, col2=None):
-        """
-        过滤出紧凑天体数据
-        """
-        compact_object_mask = df[col1].isin(self.config.compact_object_KW)
-        if col2 is not None:
-            compact_object_mask |= df[col2].isin(self.config.compact_object_KW)
-        return df[compact_object_mask]
 
     def firstjobhere(self, simu_name):
         '''同shell命令，返回jobid。自带缓存机制'''
@@ -1083,7 +1084,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
         
-        binary_df_at_t_cbo = self.binary_df_compact_object_filter(binary_df_at_t)
+        binary_df_at_t_cbo = self.get_compact_object_only(binary_df_at_t)
         vc = binary_df_at_t_cbo['Stellar Type'].value_counts()
         # convert series to df, index as a column
         vc_df = vc.reset_index()
@@ -1171,14 +1172,9 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
         except NameError:
             plt.close(fig)
 
-    @log_time(logger)
-    def binary_df_compact_object_filter(self, df):
-        if 'KW' in df.columns:
-            compact_object_mask = df['KW'].isin(self.config.compact_object_KW)
-        elif 'Bin KW1' in df.columns and 'Bin KW2' in df.columns:
-            compact_object_mask = df['Bin KW1'].isin(self.config.compact_object_KW) | df['Bin KW2'].isin(self.config.compact_object_KW)
-        else:
-            raise ValueError("DataFrame does not contain 'KW' or 'Bin KW1/Bin KW2' columns. Columns: " + str(df.columns))
+    def get_compact_object_only(self, df):
+        hdf5_file_processor = HDF5FileProcessor(self.config)
+        compact_object_mask = hdf5_file_processor.get_compact_object_mask(df)
         return df[compact_object_mask]
     
     @log_time(logger)
