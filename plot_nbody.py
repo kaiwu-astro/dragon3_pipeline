@@ -246,6 +246,16 @@ class HDF5FileProcessor:
         single_df_all['Distance_to_cluster_center[pc]'] = np.sqrt(
             single_df_all['X [pc]']**2 + single_df_all['Y [pc]']**2 + single_df_all['Z [pc]']**2
         )
+        single_df_all['mod_velocity[kmps]'] = np.sqrt(
+            single_df_all['V1']**2 + single_df_all['V2']**2 + single_df_all['V3']**2
+        )
+        ## 虽然星团质心已知有偏移，但不知质心速度如何，这里验算一下质心速度。如果质心速度的mod超过0.1km/s，就警告
+        vcm_x = (single_df_all['V1'] * single_df_all['M']).sum() / single_df_all['M'].sum()
+        vcm_y = (single_df_all['V2'] * single_df_all['M']).sum() / single_df_all['M'].sum()
+        vcm_z = (single_df_all['V3'] * single_df_all['M']).sum() / single_df_all['M'].sum()
+        vcm_mod = np.sqrt(vcm_x**2 + vcm_y**2 + vcm_z**2)
+        if vcm_mod > 0.1:
+            logger.warning(f"[{hdf5_path}] Warning: Cluster center of mass velocity = ({vcm_x:.3f}, {vcm_y:.3f}, {vcm_z:.3f}) km/s, mod={vcm_mod:.3f} km/s, seems high")
         single_df_all['Stellar Type'] = single_df_all['KW'].map(self.config.kw_to_stellar_type_verbose)
         # NS和BH的光度、温度都是artificial。模拟器设置的值离主序太远，修改以方便展示。
         ## 光度统一设为画图的光度下限
@@ -355,22 +365,37 @@ class HDF5FileProcessor:
         return compact_object_mask
 
     def mark_funny_star_single(self, single_df):
-        """标记并返回单星 IMBH 掩码"""
+        """标记并返回单星"有趣"目标掩码（通过写入tag_*列，并汇总到is_funny）"""
         df = single_df
         low, high = self.config.IMBH_mass_range_msun
-        mask = (df['KW'] == 14) & df['M'].between(low, high)
+
+        mask_imbh = (df['KW'] == 14) & df['M'].between(low, high)
         if 'tag_IMBH' not in df.columns:
             df['tag_IMBH'] = False
-        df.loc[mask, 'tag_IMBH'] = True
+        df.loc[mask_imbh, 'tag_IMBH'] = True
+
+        # NEW: NS
+        mask_ns = (df['KW'] == 13)
+        if 'tag_NS' not in df.columns:
+            df['tag_NS'] = False
+        df.loc[mask_ns, 'tag_NS'] = True
+
+        # NEW: high_velocity_halo_star: r>20pc & v>50 km/s
+        mask_hv_halo = (df['Distance_to_cluster_center[pc]'] > 20) & (df['mod_velocity[kmps]'] > 50)
+        if 'tag_high_velocity_halo_star' not in df.columns:
+            df['tag_high_velocity_halo_star'] = False
+        df.loc[mask_hv_halo, 'tag_high_velocity_halo_star'] = True
+
         if 'is_funny' not in df.columns:
             df['is_funny'] = False
-        df.loc[mask, 'is_funny'] = True
+        df.loc[mask_imbh | mask_ns | mask_hv_halo, 'is_funny'] = True
 
     def mark_funny_star_binary(self, binary_df):
-        """标记并返回双星“有趣”目标掩码"""
+        """标记并返回双星“有趣”目标掩码（通过写入tag_*列，并汇总到is_funny）"""
         df = binary_df
         low, high = self.config.IMBH_mass_range_msun
         gap_low, gap_high = self.config.PISNe_mass_gap
+
         mask_bh1 = df['Bin KW1'] == 14
         mask_bh2 = df['Bin KW2'] == 14
 
@@ -401,7 +426,48 @@ class HDF5FileProcessor:
             df['tag_PISNe_mass_gap_BH'] = False
         df.loc[mask_pisne, 'tag_PISNe_mass_gap_BH'] = True
 
-        combined_mask = mask_imbh | mask_emr | mask_high_e | mask_pisne
+        # NEW: BH-NS binary
+        mask_ns1 = df['Bin KW1'] == 13
+        mask_ns2 = df['Bin KW2'] == 13
+        mask_bh_ns = (mask_bh1 & mask_ns2) | (mask_bh2 & mask_ns1)
+        if 'tag_BH_NS' not in df.columns:
+            df['tag_BH_NS'] = False
+        df.loc[mask_bh_ns, 'tag_BH_NS'] = True
+
+        # NEW: any-NS binary
+        mask_ns_any = mask_ns1 | mask_ns2
+        if 'tag_NS_any' not in df.columns:
+            df['tag_NS_any'] = False
+        df.loc[mask_ns_any, 'tag_NS_any'] = True
+
+        # NEW: Bin cm KW odd/even flags (robust to missing column)
+        if 'Bin cm KW' in df.columns:
+            bcmkw = df['Bin cm KW']
+            mask_mass_transferring = (bcmkw > 10) & ((bcmkw.astype(int) % 2) == 1)
+            mask_circularized = (bcmkw >= 10) & ((bcmkw.astype(int) % 2) == 0)
+        else:
+            logger.debug("[mark_funny_star_binary] Column 'Bin cm KW' not found; skip mass_transferring/circularized tags.")
+            mask_mass_transferring = False
+            mask_circularized = False
+
+        if 'tag_mass_transferring_binary' not in df.columns:
+            df['tag_mass_transferring_binary'] = False
+        df.loc[mask_mass_transferring, 'tag_mass_transferring_binary'] = True
+
+        if 'tag_circularized_binary' not in df.columns:
+            df['tag_circularized_binary'] = False
+        df.loc[mask_circularized, 'tag_circularized_binary'] = True
+
+        combined_mask = (
+            mask_imbh |
+            mask_emr |
+            mask_high_e |
+            mask_pisne |
+            mask_bh_ns |
+            mask_ns_any |
+            mask_mass_transferring |
+            mask_circularized
+        )
         if 'is_funny' not in df.columns:
             df['is_funny'] = False
         df.loc[combined_mask, 'is_funny'] = True
