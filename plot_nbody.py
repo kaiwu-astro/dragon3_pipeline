@@ -114,6 +114,10 @@ class ConfigManager:
         self.selected_lagr_percent: list = ['<RC', '10%', '30%', '50%', '70%', '90%', '95%']
         self.ECLOSE_INPUT = 1.0 # Binding energy per unit mass for hard binary (positive)
         self.universe_age_myr = 13.8e3
+        self.IMBH_mass_range_msun = (1e2, 1e5)
+        self.extreme_mass_ratio_upper = 0.1
+        self.high_BH_ecc_lower = 0.1
+        self.PISNe_mass_gap = (64, 161)
         self.kw_to_stellar_type = {
             -1: "PMS",
             0:  "LMS",
@@ -322,7 +326,7 @@ class HDF5FileProcessor:
     @log_time(logger)
     def get_snapshot_time(self, hdf5_path):
         """从文件名中提取快照时间"""
-        return int(hdf5_path.split('snap.40_')[1].split('.h5part')[0])
+        return float(hdf5_path.split('snap.40_')[1].split('.h5part')[0])
     
     @log_time(logger)
     def get_snapshot_at_t(self, df_dict, ttot):
@@ -349,6 +353,58 @@ class HDF5FileProcessor:
         else:
             raise ValueError("DataFrame does not contain 'KW' or 'Bin KW1/Bin KW2' columns. Columns: " + str(df.columns))
         return compact_object_mask
+
+    def mark_funny_star_single(self, single_df):
+        """标记并返回单星 IMBH 掩码"""
+        df = single_df
+        low, high = self.config.IMBH_mass_range_msun
+        mask = (df['KW'] == 14) & df['M'].between(low, high)
+        if 'tag_IMBH' not in df.columns:
+            df['tag_IMBH'] = False
+        df.loc[mask, 'tag_IMBH'] = True
+        if 'is_funny' not in df.columns:
+            df['is_funny'] = False
+        df.loc[mask, 'is_funny'] = True
+
+    def mark_funny_star_binary(self, binary_df):
+        """标记并返回双星“有趣”目标掩码"""
+        df = binary_df
+        low, high = self.config.IMBH_mass_range_msun
+        gap_low, gap_high = self.config.PISNe_mass_gap
+        mask_bh1 = df['Bin KW1'] == 14
+        mask_bh2 = df['Bin KW2'] == 14
+
+        mask_imbh = (
+            (mask_bh1 & df['Bin M1*'].between(low, high)) |
+            (mask_bh2 & df['Bin M2*'].between(low, high))
+        )
+        if 'tag_IMBH' not in df.columns:
+            df['tag_IMBH'] = False
+        df.loc[mask_imbh, 'tag_IMBH'] = True
+
+        mask_bh_bh = mask_bh1 & mask_bh2
+        mask_emr = mask_bh_bh & (df['mass_ratio'] < self.config.extreme_mass_ratio_upper)
+        if 'tag_EMR_BHBH' not in df.columns:
+            df['tag_EMR_BHBH'] = False
+        df.loc[mask_emr, 'tag_EMR_BHBH'] = True
+
+        mask_high_e = mask_bh_bh & (df['Bin ECC'] > self.config.high_BH_ecc_lower)
+        if 'tag_high_e_BHBH' not in df.columns:
+            df['tag_high_e_BHBH'] = False
+        df.loc[mask_high_e, 'tag_high_e_BHBH'] = True
+
+        mask_pisne = (
+            (mask_bh1 & df['Bin M1*'].between(gap_low, gap_high)) |
+            (mask_bh2 & df['Bin M2*'].between(gap_low, gap_high))
+        )
+        if 'tag_PISNe_mass_gap_BH' not in df.columns:
+            df['tag_PISNe_mass_gap_BH'] = False
+        df.loc[mask_pisne, 'tag_PISNe_mass_gap_BH'] = True
+
+        combined_mask = mask_imbh | mask_emr | mask_high_e | mask_pisne
+        if 'is_funny' not in df.columns:
+            df['is_funny'] = False
+        df.loc[combined_mask, 'is_funny'] = True
 
 
 class ContinousFileProcessor:
@@ -1719,7 +1775,7 @@ class SimulationPlotter:
             # 获取所有快照文件
             hdf5_snap_files = sorted(
                 glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
-                key=lambda x: int(x.split('snap.40_')[1].split('.h5part')[0])
+                key=lambda x: float(x.split('snap.40_')[1].split('.h5part')[0])
             )
             # 如果最后一个快照的修改时间在24小时之内，则从列表中删除，避免读取一个正在跑的模拟
             WAIT_SNAPSHOT_AGE_HOUR = 24
