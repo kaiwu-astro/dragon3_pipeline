@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+os.environ["OPENBLAS_NUM_THREADS"] = "4" # forkserver 可能会导致每个子进程都使用全部线程，导致线程过多；限制为4线程
 from nbody_tools import *
 import gc
 import sys
@@ -12,8 +14,9 @@ try:
     logger
 except NameError:
     logger = logging.getLogger(__name__)
-    logger.addHandler(logging.StreamHandler(sys.stdout))
-    logger.setLevel(logging.DEBUG)
+    if not logger.handlers: # 避免在notebook autoreload时无法设置level
+        logger.addHandler(logging.StreamHandler(sys.stdout))
+        logger.setLevel(logging.INFO)
 try:
     import petar
 except ImportError:
@@ -87,6 +90,7 @@ class ConfigManager:
             '20sb': '/p/scratch/madnuc/wu13/mar17-dragon3-start/20softBinary-5hardBinary',
             '60sb': '/p/scratch/madnuc/wu13/mar17-dragon3-start/60softBinary-5hardBinary',
         }
+        self.particle_df_cache_dir_of = {k : self.pathof[k] + '/particle_df_cache' for k in self.pathof.keys()}
         self.input_file_path_of = {
             '0sb' : self.pathof['0sb'] + '/N1m-Dragon3.inp.init',
             '20sb': self.pathof['20sb'] + '/N1m-Dragon3.inp.init',
@@ -254,7 +258,8 @@ class HDF5FileProcessor:
         vcm_y = (single_df_all['V2'] * single_df_all['M']).sum() / single_df_all['M'].sum()
         vcm_z = (single_df_all['V3'] * single_df_all['M']).sum() / single_df_all['M'].sum()
         vcm_mod = np.sqrt(vcm_x**2 + vcm_y**2 + vcm_z**2)
-        if vcm_mod > 0.1:
+        TOO_HIGH_CLUSTER_CM_VELOCITY_THRESHOLD_KMPS = 1.0
+        if vcm_mod > TOO_HIGH_CLUSTER_CM_VELOCITY_THRESHOLD_KMPS:
             logger.warning(f"[{hdf5_path}] Warning: Cluster center of mass velocity = ({vcm_x:.3f}, {vcm_y:.3f}, {vcm_z:.3f}) km/s, mod={vcm_mod:.3f} km/s, seems high")
         single_df_all['Stellar Type'] = single_df_all['KW'].map(self.config.kw_to_stellar_type_verbose)
         # NS和BH的光度、温度都是artificial。模拟器设置的值离主序太远，修改以方便展示。
@@ -333,10 +338,9 @@ class HDF5FileProcessor:
 
         return df_dict
     
-    @log_time(logger)
-    def get_snapshot_time(self, hdf5_path):
+    def get_hdf5_name_time(self, hdf5_path):
         """从文件名中提取快照时间"""
-        return float(hdf5_path.split('snap.40_')[1].split('.h5part')[0])
+        return float(hdf5_path.split('snap.40_')[-1].split('.h5part')[0])
     
     @log_time(logger)
     def get_snapshot_at_t(self, df_dict, ttot):
@@ -1743,6 +1747,245 @@ class CollCoalVisualizer(BaseContinousFileVisualizer):
             plt.close(ax.figure)
 
 
+class ParticleTracker:
+    """粒子跟踪类，用于构建特定粒子随时间变化的数据"""
+    def __init__(self, config_manager):
+        self.config = config_manager
+        self.hdf5_file_processor = HDF5FileProcessor(config_manager)
+
+    @log_time(logger)
+    def get_particle_df_from_snap(self, df_dict, particle_name):
+        """
+        跟踪特定粒子随时间的演化
+        
+        参数:
+            df_dict: 包含 'singles', 'binaries', 'scalars' 的字典，通过 HDF5FileProcessor.read_file 获得
+            particle_name: 要跟踪的粒子Name (例如 94820)
+        
+        返回:
+            particle_history_df: 包含该粒子所有时间点数据的DataFrame
+        """
+        single_df_all = df_dict['singles']
+        binary_df_all = df_dict['binaries']
+        
+        # 从单星数据中提取该粒子的记录
+        single_particle_df = single_df_all[single_df_all['Name'] == particle_name].copy()
+        
+        # 从双星数据中提取该粒子的记录
+        # 检查该粒子是否作为双星的成员1或成员2
+        binary_as_1 = binary_df_all[binary_df_all['Bin Name1'] == particle_name].copy()
+        binary_as_2 = binary_df_all[binary_df_all['Bin Name2'] == particle_name].copy()
+        if not binary_as_1.empty:
+            binary_as_1['state'] = 'binary'
+            binary_as_1['companion_name'] = binary_as_1['Bin Name2']
+            _binary = binary_as_1
+        elif not binary_as_2.empty:
+            binary_as_2['state'] = 'binary'
+            binary_as_2['companion_name'] = binary_as_2['Bin Name1']
+            _binary = binary_as_2
+        
+        if (not binary_as_1.empty) and (not binary_as_2.empty):
+            # assert: binary_as_1 和 binary_as_2 不会同时非空，否则报错，打印 df_dict['scalars']的TTOT
+            try:
+                scalars_df = df_dict.get('scalars', None)
+                if scalars_df is None:
+                    scalar_ttot = None
+                elif 'TTOT' in scalars_df.columns:
+                    scalar_ttot = np.array(scalars_df['TTOT'].unique())
+                else:
+                    scalar_ttot = np.array(scalars_df.index.unique())
+            except Exception as e:
+                logger.warning(f"Warning: Failed to extract TTOT from df_dict['scalars']: {e}")
+                scalar_ttot = None
+
+            t1 = np.array(binary_as_1['TTOT'].unique()) if 'TTOT' in binary_as_1.columns else None
+            t2 = np.array(binary_as_2['TTOT'].unique()) if 'TTOT' in binary_as_2.columns else None
+            logger.error(
+                f"Assertion failed: particle {particle_name} appears as both Bin Name1 and Bin Name2. "
+                f"binary_as_1 TTOT={t1}, binary_as_2 TTOT={t2}, scalars TTOT={scalar_ttot}"
+            )
+            raise AssertionError(
+                f"particle {particle_name} appears as both Bin Name1 and Bin Name2 at TTOT={scalar_ttot}"
+            )
+        
+        # 合并所有记录
+        if binary_as_1.empty and binary_as_2.empty:
+            single_particle_df['state'] = 'single'
+            single_particle_df['companion_name'] = np.nan
+            particle_history_df = single_particle_df
+        else:
+            # 正常在双星里
+            particle_history_df = single_particle_df.merge(
+                    _binary,
+                    on='TTOT',
+                    how='outer',                 
+                    suffixes=('', '_from_binary') # single vs _binary 的同名列会自动加后缀
+                )
+        
+        if not particle_history_df.empty:
+            particle_history_df = particle_history_df.sort_values('TTOT').reset_index(drop=True)
+            return particle_history_df
+        else:
+            logger.warning(f"Warning: Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}")
+            return pd.DataFrame()
+
+    @log_time(logger)
+    def get_particle_summary(self, particle_history_df):
+        """
+        获取粒子演化历史的摘要信息
+        
+        参数:
+            particle_history_df: track_particle返回的DataFrame
+        
+        返回:
+            summary_dict: 包含粒子演化关键信息的字典
+        """
+        if particle_history_df.empty:
+            return {}
+        
+        summary = {
+            'particle_name': particle_history_df['Name'].iloc[0] if 'Name' in particle_history_df.columns else None,
+            'total_snapshots': len(particle_history_df),
+            'time_range_myr': (particle_history_df['Time[Myr]'].min(), particle_history_df['Time[Myr]'].max()),
+            'single_count': len(particle_history_df[particle_history_df['state'] == 'single']),
+            'binary_count': len(particle_history_df[particle_history_df['state'].str.contains('binary', na=False)]),
+            'initial_mass': particle_history_df['M'].iloc[0] if 'M' in particle_history_df.columns else None,
+            'final_mass': particle_history_df['M'].iloc[-1] if 'M' in particle_history_df.columns else None,
+            'stellar_types': particle_history_df['KW'].unique().tolist() if 'KW' in particle_history_df.columns else [],
+        }
+        
+        return summary
+
+    def _process_single_snap_for_particle(self, args):
+        """Worker function for pool"""
+        hdf5_path, particle_name, simu_name, feather_path = args
+        
+        # Check cache again just in case (though filtered outside)
+        if os.path.exists(feather_path):
+            try:
+                return pd.read_feather(feather_path)
+            except Exception:
+                pass 
+        
+        try:
+            df_dict = self.hdf5_file_processor.read_file(hdf5_path, simu_name)
+
+            # Extract
+            particle_df = self.get_particle_df_from_snap(df_dict, particle_name)
+            
+            if not particle_df.empty:
+                particle_df.to_feather(feather_path)
+            
+            return particle_df
+        except Exception as e:
+            logger.error(f"Error processing {hdf5_path} for particle {particle_name}: {e}")
+            return pd.DataFrame()
+
+    @log_time(logger)
+    def get_particle_new_df_all(self, simu_name, particle_name, update=True):
+        """
+        获取某个粒子在整个模拟过程中的完整演化历史
+        使用缓存机制和并行处理
+        """
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        particle_cache_dir = os.path.join(cache_base, str(particle_name))
+        os.makedirs(particle_cache_dir, exist_ok=True)
+        
+        all_feather_path = os.path.join(particle_cache_dir, f"{particle_name}_ALL.df.feather")
+        
+        # 1. 读取现有汇总缓存
+        old_df_all = pd.DataFrame()
+        particle_skip_until = -1.0
+        
+        if os.path.exists(all_feather_path):
+            try:
+                old_df_all = pd.read_feather(all_feather_path)
+                if not old_df_all.empty and 'TTOT' in old_df_all.columns:
+                    particle_skip_until = old_df_all['TTOT'].max()
+                    logger.info(f"Loaded existing particle df for {particle_name}, records: {len(old_df_all)}, max TTOT: {particle_skip_until}")
+            except Exception as e:
+                logger.warning(f"Failed to read aggregated cache {all_feather_path}: {e}")
+
+        if not update:
+            return old_df_all
+        
+        # 2. 获取并过滤文件列表
+        hdf5_snap_files = sorted(
+            glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
+            key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
+        )
+        files_to_process = [f for f in hdf5_snap_files if self.hdf5_file_processor.get_hdf5_name_time(f) > particle_skip_until]
+        
+        if not files_to_process:
+            logger.info(f"No new snapshots to process for particle {particle_name}")
+            return old_df_all
+
+        logger.info(f"Found {len(files_to_process)} new snapshots to process for particle {particle_name}: {files_to_process[0]} ... {files_to_process[-1]}")
+
+        # 3. 准备任务参数
+        tasks = []
+        for fpath in files_to_process:
+            fname = os.path.basename(fpath)
+            feather_name = f"{fname}_{particle_name}.df.feather"
+            feather_path = os.path.join(particle_cache_dir, feather_name)
+            tasks.append((fpath, particle_name, simu_name, feather_path))
+            
+
+        # 4. 并行处理
+        new_dfs = []
+        consecutive_missing_count = 0
+        MISSING_THRESHOLD = 5 # 由于粒子被merge / eject等原因会导致在某时刻后面的snap根本不用搜
+
+        ctx = multiprocessing.get_context('forkserver')
+        with ctx.Pool(
+            processes=self.config.processes_count, 
+            maxtasksperchild=self.config.tasks_per_child
+        ) as pool:
+            # imap returns result in order of input
+            # 我们不直接 list(tqdm(...))，而是手动迭代以便根据返回结果控制流程
+            iterator = pool.imap(self._process_single_snap_for_particle, tasks)
+            # 使用 tqdm 包装迭代器用于显示进度
+            tqdm_iterator = tqdm(iterator, total=len(tasks), desc=f"Tracking {particle_name} in {simu_name}")
+
+            try:
+                for res_df in tqdm_iterator:
+                    if res_df is not None and not res_df.empty:
+                        new_dfs.append(res_df)
+                        consecutive_missing_count = 0 # 重置计数器
+                    else:
+                        consecutive_missing_count += 1
+                    
+                    if consecutive_missing_count >= MISSING_THRESHOLD:
+                        logger.info(f"Particle {particle_name} missing for {consecutive_missing_count} consecutive snapshots. Stopping search early and starting merging results")
+                        pool.terminate() # 强制结束进程池
+                        break # 跳出循环
+            except Exception as e:
+                # 捕获可能的 pool.terminate() 引发的异常或其他错误
+                logger.warning(f"Process pool interrupted or error occurred: {e}")
+        
+        # 5. 合并与保存
+        if new_dfs:
+            new_df_concat = pd.concat(new_dfs, ignore_index=True)
+            if not old_df_all.empty:
+                new_df_all = pd.concat([old_df_all, new_df_concat], ignore_index=True)
+            else:
+                new_df_all = new_df_concat
+            
+            # 去重并排序
+            if 'TTOT' in new_df_all.columns:
+                new_df_all = new_df_all.sort_values('TTOT').drop_duplicates(subset=['TTOT'], keep='last').reset_index(drop=True)
+            
+            # 保存汇总
+            try:
+                new_df_all.to_feather(all_feather_path)
+                logger.info(f"Updated aggregated cache for {particle_name} at {all_feather_path}")
+            except Exception as e:
+                logger.error(f"Failed to save aggregated cache: {e}")
+            
+            return new_df_all
+        else:
+            return old_df_all
+
 class SimulationPlotter:
     """模拟处理类，管理整个模拟处理流程"""
     def __init__(self, config_manager):
@@ -1751,11 +1994,12 @@ class SimulationPlotter:
         self.lagr_file_processor = LagrFileProcessor(config_manager)
         self.hdf5_visualizer = HDF5Visualizer(config_manager)
         self.lagr_visualizer = LagrVisualizer(config_manager)
+        self.particle_tracker = ParticleTracker(config_manager)
 
     def plot_hdf5_snapshots(self, hdf5_snap_path, simu_name):
         """处理单个快照文件"""
         # 获取快照时间
-        t_nbody_in_filename = self.hdf5_file_processor.get_snapshot_time(hdf5_snap_path)
+        t_nbody_in_filename = self.hdf5_file_processor.get_hdf5_name_time(hdf5_snap_path)
         if t_nbody_in_filename < self.config.skip_until_of[simu_name]:
             logger.debug("skipped")
             return
@@ -1841,7 +2085,7 @@ class SimulationPlotter:
             # 获取所有快照文件
             hdf5_snap_files = sorted(
                 glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
-                key=lambda x: float(x.split('snap.40_')[1].split('.h5part')[0])
+                key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
             )
             # 如果最后一个快照的修改时间在24小时之内，则从列表中删除，避免读取一个正在跑的模拟
             WAIT_SNAPSHOT_AGE_HOUR = 24
@@ -1855,7 +2099,8 @@ class SimulationPlotter:
             )
             
             # 使用进程池并行处理
-            with multiprocessing.Pool(
+            ctx = multiprocessing.get_context('forkserver')
+            with ctx.Pool(
                 processes=self.config.processes_count, 
                 maxtasksperchild=self.config.tasks_per_child
             ) as pool:
@@ -1879,13 +2124,6 @@ def main():
     except getopt.GetoptError as err:
         print(err) 
         sys.exit(2)
-
-    warnings.filterwarnings(
-        "ignore",
-        message=r".*multi-threaded, use of fork\(\) may lead to deadlocks.*",
-        category=DeprecationWarning,
-        module="multiprocessing.popen_fork",
-    )
 
     config = ConfigManager(opts)
     
