@@ -1858,23 +1858,13 @@ class ParticleTracker:
 
     def _process_single_snap_for_particle(self, args):
         """Worker function for pool"""
-        hdf5_path, particle_name, simu_name, feather_path = args
-        
-        # Check cache again just in case (though filtered outside)
-        if os.path.exists(feather_path):
-            try:
-                return pd.read_feather(feather_path)
-            except Exception:
-                pass 
+        hdf5_path, particle_name, simu_name = args
         
         try:
             df_dict = self.hdf5_file_processor.read_file(hdf5_path, simu_name)
 
             # Extract
             particle_df = self.get_particle_df_from_snap(df_dict, particle_name)
-            
-            if not particle_df.empty:
-                particle_df.to_feather(feather_path)
             
             return particle_df
         except Exception as e:
@@ -1888,10 +1878,9 @@ class ParticleTracker:
         使用缓存机制和并行处理
         """
         cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        particle_cache_dir = os.path.join(cache_base, str(particle_name))
-        os.makedirs(particle_cache_dir, exist_ok=True)
+        os.makedirs(cache_base, exist_ok=True)
         
-        all_feather_path = os.path.join(particle_cache_dir, f"{particle_name}_ALL.df.feather")
+        all_feather_path = os.path.join(cache_base, f"{particle_name}_ALL.df.feather")
         
         # 1. 读取现有汇总缓存
         old_df_all = pd.DataFrame()
@@ -1925,10 +1914,7 @@ class ParticleTracker:
         # 3. 准备任务参数
         tasks = []
         for fpath in files_to_process:
-            fname = os.path.basename(fpath)
-            feather_name = f"{fname}_{particle_name}.df.feather"
-            feather_path = os.path.join(particle_cache_dir, feather_name)
-            tasks.append((fpath, particle_name, simu_name, feather_path))
+            tasks.append((fpath, particle_name, simu_name))
             
 
         # 4. 并行处理
