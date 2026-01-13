@@ -219,7 +219,7 @@ class HDF5FileProcessor:
     
     @log_time(logger)
     def read_file(self, hdf5_path, simu_name=None, N0=None):
-        """加载并预处理HDF5数据. 
+        """加载并预处理HDF5数据。从一个HDF5文件得到多个DataFrame，含多个时刻的snapshot。
         参数：
             simu_name：用于获取初始条件文件路径，读取N0
             也可simu_name=None，改为直接传入N0
