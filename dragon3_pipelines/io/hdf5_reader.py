@@ -17,19 +17,22 @@ logger = logging.getLogger(__name__)
 
 
 class HDF5FileProcessor:
-    """读取和画图前预处理HDF5数据"""
+    """Read and preprocess HDF5 data for plotting"""
     def __init__(self, config_manager):
         self.config = config_manager
     
     @log_time(logger)
     def read_file(self, hdf5_path: str, simu_name: Optional[str] = None, N0: Optional[int] = None) -> Dict[str, pd.DataFrame]:
-        """加载并预处理HDF5数据。从一个HDF5文件得到多个DataFrame，含多个时刻的snapshot。
-        参数：
-            hdf5_path: HDF5文件路径
-            simu_name：用于获取初始条件文件路径，读取N0
-            N0: 初始粒子数（如果simu_name为None，则必须提供）
-        返回：
-            df_dict：包含'scalars', 'singles', 'binaries', 'mergers'的字典
+        """
+        Load and preprocess HDF5 data. Extract multiple DataFrames from a single HDF5 file containing snapshots at multiple times.
+        
+        Args:
+            hdf5_path: Path to HDF5 file
+            simu_name: Used to get initial condition file path and read N0
+            N0: Initial particle count (required if simu_name is None)
+        
+        Returns:
+            df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
         """
         from dragon3_pipelines.io.text_parsers import get_valueStr_of_namelist_key, get_scale_dict_from_hdf5_df, dataframes_from_hdf5_file
         from dragon3_pipelines.io.text_parsers import tau_gw
@@ -143,20 +146,22 @@ class HDF5FileProcessor:
         return df_dict
     
     def get_hdf5_name_time(self, hdf5_path: str) -> float:
-        """从文件名中提取快照时间"""
+        """Extract snapshot time from filename"""
         return float(hdf5_path.split('snap.40_')[-1].split('.h5part')[0])
     
     @log_time(logger)
     def get_snapshot_at_t(self, df_dict: Dict[str, pd.DataFrame], ttot: float) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], bool]:
         """
-        获取特定时间的数据
-        参数：
-            df_dict：包含'scalars', 'singles', 'binaries', 'mergers'的字典
-            ttot：要获取的时间点
-        返回：
-            single_df：该时间点的单星DataFrame
-            binary_df：该时间点的双星DataFrame
-            is_valid：True/False，检验single_/binary_df长度和scaler记载的单星/双星数量是否一致
+        Get data at a specific time
+        
+        Args:
+            df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
+            ttot: Time point to retrieve
+        
+        Returns:
+            single_df: Single star DataFrame at this time
+            binary_df: Binary star DataFrame at this time
+            is_valid: True/False, validates if lengths match scalar counts
         """
         single_df = df_dict['singles'][df_dict['singles']['TTOT'] == ttot].copy()
         binary_df = df_dict['binaries'][df_dict['binaries']['TTOT'] == ttot].copy()
@@ -172,7 +177,7 @@ class HDF5FileProcessor:
         return single_df, binary_df, True
     
     def get_compact_object_mask(self, df: pd.DataFrame) -> pd.Series:
-        """获取双星中包含致密天体的掩码"""
+        """Get mask for binaries containing compact objects"""
         if 'KW' in df.columns:
             compact_object_mask = df['KW'].isin(self.config.compact_object_KW)
         elif 'Bin KW1' in df.columns and 'Bin KW2' in df.columns:
@@ -182,7 +187,7 @@ class HDF5FileProcessor:
         return compact_object_mask
 
     def mark_funny_star_single(self, single_df: pd.DataFrame) -> None:
-        """标记并返回单星"有趣"目标掩码（通过写入tag_*列，并汇总到is_funny）"""
+        """Mark 'interesting' single star targets (writes tag_* columns and aggregates to is_funny)"""
         df = single_df
         low, high = self.config.IMBH_mass_range_msun
 
@@ -208,7 +213,7 @@ class HDF5FileProcessor:
         df.loc[mask_imbh | mask_ns | mask_hv_halo, 'is_funny'] = True
 
     def mark_funny_star_binary(self, binary_df: pd.DataFrame) -> None:
-        """标记并返回双星"有趣"目标掩码（通过写入tag_*列，并汇总到is_funny）"""
+        """Mark 'interesting' binary star targets (writes tag_* columns and aggregates to is_funny)"""
         df = binary_df
         low, high = self.config.IMBH_mass_range_msun
         gap_low, gap_high = self.config.PISNe_mass_gap
@@ -292,16 +297,16 @@ class HDF5FileProcessor:
     def _compute_binding_energy(self, m_bin: float, m3: float, r: float, 
                                 v_rel_x: float, v_rel_y: float, v_rel_z: float) -> float:
         """
-        计算三体系统的绑定能
+        Compute binding energy for a triple system
         
-        参数:
-            m_bin: 双星总质量 [Msun]
-            m3: 第三体质量 [Msun]
-            r: 双星质心到第三体的距离 [pc]
-            v_rel_x, v_rel_y, v_rel_z: 相对速度分量 [km/s]
+        Args:
+            m_bin: Binary total mass [Msun]
+            m3: Third body mass [Msun]
+            r: Distance from binary center of mass to third body [pc]
+            v_rel_x, v_rel_y, v_rel_z: Relative velocity components [km/s]
         
-        返回:
-            E_bind: 绑定能 [Msun * (km/s)^2]，负值表示绑定
+        Returns:
+            E_bind: Binding energy [Msun * (km/s)^2], negative value indicates bound
         """
         mu = (m_bin * m3) / (m_bin + m3)
         v_rel = np.sqrt(v_rel_x**2 + v_rel_y**2 + v_rel_z**2)
@@ -314,14 +319,14 @@ class HDF5FileProcessor:
     @log_time(logger)
     def get_triples_from_hdf5(self, df_dict: Dict[str, pd.DataFrame], ttot: float) -> pd.DataFrame:
         """
-        识别层级三体系统（hierarchical triples）
+        Identify hierarchical triple systems
         
-        参数:
-            df_dict: 包含 'singles', 'binaries', 'scalars' 的字典
-            ttot: 当前时刻的 TTOT 值
+        Args:
+            df_dict: Dictionary containing 'singles', 'binaries', 'scalars'
+            ttot: Current TTOT value
         
-        返回:
-            triples_df: 包含三体系统信息的 DataFrame
+        Returns:
+            triples_df: DataFrame containing triple system information
         """
         pc_to_AU = constants.pc.to(u.AU).value
         

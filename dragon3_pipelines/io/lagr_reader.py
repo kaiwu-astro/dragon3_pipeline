@@ -28,12 +28,13 @@ class ContinousFileProcessor:
     def read_file(self, simu_name: str):
         self.concat_file(simu_name)
         logger.debug(f'Loading gathered self.file_basename at {self.file_path}')
-        raise NotImplementedError("子类必须实现此方法")
+        raise NotImplementedError("Subclass must implement this method")
     
     def clean_data(self, df: pd.DataFrame, timecol: str = 'TIME[NB]') -> pd.DataFrame:
         """
-        可能因为模拟重跑而造成某个star反复输出
-        在类似[1.0, 2.1, 3.2, 4.3, 5.7, 3.5, 4.6, 5.9, 4.7, 4.8, 7.1]的数据里去掉 3.5， 4.6， 4.7，4.8
+        Remove duplicate/backward entries due to simulation reruns.
+        In data like [1.0, 2.1, 3.2, 4.3, 5.7, 3.5, 4.6, 5.9, 4.7, 4.8, 7.1], 
+        remove 3.5, 4.6, 4.7, 4.8
         """
         is_forwarding = np.array([df[timecol][:i+1].max() == v for i, v in df[timecol].items()])
         if not is_forwarding.all():
@@ -41,7 +42,7 @@ class ContinousFileProcessor:
         return df[is_forwarding].reset_index(drop=True)
 
     def firstjobhere(self, simu_name: str) -> str:
-        '''同shell命令，返回jobid。自带缓存机制'''
+        """Get first job ID (cached)"""
         if simu_name not in self.firstjobof.keys():
             get_firstj_cmd = f'cd {self.config.pathof[simu_name]};' + \
             r'''ls | grep -E '^[0-9]+$' | sort -n | head -n 1'''
@@ -52,7 +53,7 @@ class ContinousFileProcessor:
     
     def get_scale_dict_from_stdout(self, simu_name: str) -> Dict[str, float]:
         """
-        从stdout中提取缩放字典。自带缓存机制
+        Extract scaling dictionary from stdout (cached)
         """
         from glob import glob
         from dragon3_pipelines.io.text_parsers import get_scale_dict
@@ -65,7 +66,7 @@ class ContinousFileProcessor:
 
 
 class LagrFileProcessor(ContinousFileProcessor):
-    """读取和画图前预处理lagr.7"""
+    """Read and preprocess lagr.7 files"""
     def __init__(self, config_manager):
         super().__init__(config_manager, file_basename='lagr.7')
     
@@ -81,8 +82,8 @@ class LagrFileProcessor(ContinousFileProcessor):
     
     def clean_data(self, l7df: pd.DataFrame) -> pd.DataFrame:
         """
-        1) 丢弃包含非数值型数据的行（应全为 int/float）
-        2) 处理 'Time[NB]' 的重复：保留最后一次出现（避免中途中断导致的不完整行）。
+        1) Drop rows with non-numeric data (should all be int/float)
+        2) Handle duplicate 'Time[NB]': keep last occurrence (avoid incomplete rows from interruptions)
         """
         numeric_df = l7df.apply(pd.to_numeric, errors='coerce')
         non_numeric_mask = (numeric_df.isna() & l7df.notna()).any(axis=1)

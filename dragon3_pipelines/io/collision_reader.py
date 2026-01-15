@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class _Coll_Coal_FileProcessor(ContinousFileProcessor):
-    """读取和画图前预处理coll.13和coal.24"""
+    """Read and preprocess coll.13 and coal.24 files"""
     def read_file(self, simu_name: str, read_csv_func: Callable[[str], pd.DataFrame]) -> pd.DataFrame:
         self.concat_file(simu_name)
         logger.debug(f'Loading gathered {self.file_basename} of {simu_name} at {self.file_path}')
@@ -36,7 +36,7 @@ class _Coll_Coal_FileProcessor(ContinousFileProcessor):
     
     def merge_coll_coal(self, df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
         """
-        合并coll.13和coal.24类型df的数据. 非共同col的缺失数据自动添加NaN
+        Merge coll.13 and coal.24 dataframes. Missing columns automatically filled with NaN
         """
         return pd.concat([df1, df2], ignore_index=True)
 

@@ -15,7 +15,7 @@ from dragon3_pipelines.utils import get_output, can_convert_to_float
 
 
 def get_scale_dict(stdout_path: str) -> Dict[str, float]:
-    """从stdout文件中提取物理缩放字典"""
+    """Extract physical scaling dictionary from stdout file"""
     scaling_line = get_output(
             f'grep "PHYSICAL SCALING" {stdout_path}')
     scaling_splitted = scaling_line[0].split(":")[-1].split()
@@ -30,7 +30,7 @@ def get_scale_dict(stdout_path: str) -> Dict[str, float]:
 
 
 def get_scale_dict_from_hdf5_df(scalar_df: pd.DataFrame) -> Dict[str, float]:
-    """从HDF5 scalar DataFrame中提取缩放字典"""
+    """Extract scaling dictionary from HDF5 scalar DataFrame"""
     return {
         'r': scalar_df['RBAR'].values[0],
         'v': scalar_df['VSTAR'].values[0],
@@ -40,7 +40,7 @@ def get_scale_dict_from_hdf5_df(scalar_df: pd.DataFrame) -> Dict[str, float]:
 
 
 def load_snapshot_data(hdf5_file_path: str, step_key: str) -> Dict:
-    """从HDF5文件加载指定时间步的数据，并分类组织"""
+    """Load data for a specific timestep from HDF5 file and organize by category"""
     with h5py.File(hdf5_file_path, 'r') as f:
         step_group = f[step_key]
         
@@ -73,7 +73,7 @@ def load_snapshot_data(hdf5_file_path: str, step_key: str) -> Dict:
 
 
 def dataframes_from_hdf5_file(hdf5_file_path: str) -> Dict[str, pd.DataFrame]:
-    """构建三个数据集：单星、双星和merger的时间序列"""
+    """Build three datasets: time series for singles, binaries, and mergers"""
     with h5py.File(hdf5_file_path, 'r') as f:
         step_keys = sorted([k for k in f.keys() if k.startswith('Step#')])
     
@@ -139,13 +139,13 @@ def dataframes_from_hdf5_file(hdf5_file_path: str) -> Dict[str, pd.DataFrame]:
 
 def merge_multiple_hdf5_dataframes(hdf5_pandas_dataframes_dict_list: list) -> Dict[str, pd.DataFrame]:
     """
-    整合多个dataframes_from_hdf5_file处理后的数据集
+    Merge multiple datasets processed by dataframes_from_hdf5_file
     
-    参数:
-    hdf5_pandas_dataframes_dict_list - 包含多个数据集字典的列表
+    Args:
+        hdf5_pandas_dataframes_dict_list: List containing multiple dataset dictionaries
     
-    返回:
-    合并后的数据集字典
+    Returns:
+        Merged dataset dictionary
     """
     merged_datasets = {
         'scalars': None,
@@ -175,10 +175,10 @@ def merge_multiple_hdf5_dataframes(hdf5_pandas_dataframes_dict_list: list) -> Di
 
 def decode_bytes_columns_inplace(df: pd.DataFrame) -> None:
     """
-    解码DataFrame中指定列的字节数据为字符串，并去除空格
+    Decode byte data in DataFrame columns to strings and strip whitespace
     
-    参数:
-        df: 要处理的DataFrame
+    Args:
+        df: DataFrame to process (modified in place)
     """
     _col_decoded = []
     for col in df.columns:
@@ -192,19 +192,19 @@ def tau_gw(a: Union[float, Quantity], e: Union[float, Quantity],
            mu: Union[float, Quantity], M: Union[float, Quantity], 
            G=None, c=None) -> Union[float, Quantity]:
     """
-    计算双黑洞系统因引力波辐射而合并的时间尺度 τ_gw（秒）。
+    Calculate gravitational wave merger timescale for binary black hole systems.
     Sobolenko, Berczik, Spurzem 2021 eqn (3)
 
-    参数:
-        a: 轨道半长轴
-        e: 离心率（0 <= e < 1）
-        mu: 约化质量
-        M: 总质量
-        G: 引力常数（可选）
-        c: 光速（可选）
+    Args:
+        a: Semi-major axis
+        e: Eccentricity (0 <= e < 1)
+        mu: Reduced mass
+        M: Total mass
+        G: Gravitational constant (optional)
+        c: Speed of light (optional)
 
-    返回:
-        合并时标 τ_gw
+    Returns:
+        Merger timescale τ_gw
     """
     if G is None:
         if isinstance(a, float):
@@ -226,7 +226,7 @@ def tau_gw(a: Union[float, Quantity], e: Union[float, Quantity],
 
 def load_GWTC_catalog(csvpath: str = '/p/project1/madnuc/wu13/intermediate_data/GWTC_catalog.csv', 
                       reload: bool = False) -> pd.DataFrame:
-    """加载GWTC引力波目录"""
+    """Load GWTC gravitational wave catalog"""
     if not reload and os.path.exists(os.path.splitext(csvpath)[0] + '.pkl'):
         return pd.read_pickle(os.path.splitext(csvpath)[0] + '.pkl')
 
@@ -253,14 +253,14 @@ def load_GWTC_catalog(csvpath: str = '/p/project1/madnuc/wu13/intermediate_data/
 @lru_cache
 def get_valueStr_of_namelist_key(path: str, key: str) -> str:
     """
-    从namelist输入文件中提取初始参数。带缓存
+    Extract parameter value from namelist input file (cached)
     
-    参数:
-        path: namelist输入文件的路径
-        key: 要提取的namelist键
+    Args:
+        path: Path to namelist input file
+        key: Namelist key to extract
         
-    返回:
-        value (str)
+    Returns:
+        Value as string
     """
     with open(path, 'r') as f:
         content = f.read()
@@ -275,27 +275,27 @@ def get_valueStr_of_namelist_key(path: str, key: str) -> str:
 
 
 def read_bwdat(filename: str) -> pd.DataFrame:
-    """读取bwdat文件"""
+    """Read bwdat file"""
     return pd.read_csv(filename, skiprows=(0,), sep=r'\s+')
 
 
 def read_bdat(filename: str) -> pd.DataFrame:
-    """读取bdat文件"""
+    """Read bdat file"""
     return pd.read_csv(filename, sep=r'\s+')
 
 
 def read_coll_13(path: str) -> pd.DataFrame:
-    """读取coll.13碰撞文件"""
+    """Read coll.13 collision file"""
     return pd.read_csv(path, sep=r'\s+', skiprows=(0, 1, 2, 3, 5))
 
 
 def read_coal_24(path: str) -> pd.DataFrame:
-    """读取coal.24并合文件"""
+    """Read coal.24 coalescence file"""
     return pd.read_csv(path, sep=r'\s+', skiprows=4)
 
 
 def make_l7header() -> list:
-    """生成lagr.7文件的列名"""
+    """Generate column names for lagr.7 file"""
     baselist = ['1.00E-03', '3.00E-03', '5.00E-03', '1.00E-02', '3.00E-02', '5.00E-02',
     '1.00E-01', '2.00E-01', '3.00E-01', '4.00E-01', '5.00E-01', '6.00E-01',
     '7.00E-01', '8.00E-01', '9.00E-01', '9.50E-01', '9.90E-01', '1.00E+00',
@@ -309,7 +309,7 @@ def make_l7header() -> list:
 
 
 def read_lagr_7(n6resultdir: str = '.', fname: str = "lagr.7.txt") -> pd.DataFrame:
-    """读取lagr.7文件"""
+    """Read lagr.7 file"""
     path = n6resultdir + f"/{fname}" if os.path.isdir(n6resultdir) else n6resultdir
     if not os.path.exists(path):
         raise IOError(f"{path} not found")
@@ -325,12 +325,12 @@ def l7df_to_physical_units(df: pd.DataFrame, scale_dict: Dict[str, float]) -> pd
     """
     Convert the lagr.7 DataFrame to physical units using the provided scaling factors.
     
-    参数:
+    Args:
         df: lagr.7 DataFrame
-        scale_dict: {'r': rscale, 'm': mscale, 'v': vscale, 't': tscale}
+        scale_dict: Scaling dictionary {'r': rscale, 'm': mscale, 'v': vscale, 't': tscale}
     
-    返回:
-        转换后的DataFrame
+    Returns:
+        Converted DataFrame
     """
     converted_df = df.copy()
     converted_df['Time[Myr]'] = converted_df['Time[NB]'] * scale_dict['t']
@@ -368,11 +368,11 @@ def transform_l7df_to_sns_friendly(df_physical_units: pd.DataFrame) -> pd.DataFr
     """
     Transform the lagr.7 DataFrame to a long format suitable for seaborn plotting.
     
-    参数:
-        df_physical_units: 已转换为物理单位的DataFrame
+    Args:
+        df_physical_units: DataFrame already converted to physical units
     
-    返回:
-        长格式DataFrame，包含列: Time[Myr], Percentage, Metric, Value, %
+    Returns:
+        Long-format DataFrame with columns: Time[Myr], Percentage, Metric, Value, %
     """
     if 'Time[Myr]' not in df_physical_units.columns:
         raise ValueError(
