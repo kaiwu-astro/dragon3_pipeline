@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
+if sys.version_info < (3, 10):
+    raise RuntimeError("Need python >= 3.10")
 import os
 os.environ["OPENBLAS_NUM_THREADS"] = "4" # forkserver 可能会导致每个子进程都使用全部线程，导致线程过多；限制为4线程
 from nbody_tools import *
 import gc
 import sys
-if sys.version_info < (3, 10):
-    raise RuntimeError("Need Python >= 3.10")
 import seaborn as sns
 import getopt
 import logging
