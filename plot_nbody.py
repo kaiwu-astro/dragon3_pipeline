@@ -4,12 +4,16 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4" # forkserver 可能会导致每个子�
 from nbody_tools import *
 import gc
 import sys
+if sys.version_info < (3, 10):
+    raise RuntimeError("Need Python >= 3.10")
 import seaborn as sns
 import getopt
 import logging
 import functools
 import multiprocessing
 from typing import Callable, Optional
+from scipy.spatial import cKDTree
+
 try:
     logger
 except NameError:
@@ -394,7 +398,16 @@ class HDF5FileProcessor:
     
     @log_time(logger)
     def get_snapshot_at_t(self, df_dict, ttot):
-        """获取特定时间的数据"""
+        """
+        获取特定时间的数据
+        参数：
+            df_dict：包含'scalars', 'singles', 'binaries', 'mergers'的字典
+            ttot：要获取的时间点
+        返回：
+            single_df：该时间点的单星DataFrame
+            binary_df：该时间点的双星DataFrame
+            is_valid：True/False，检验single_/binary_df长度和scaler记载的单星/双星数量是否一致
+        """
         single_df = df_dict['singles'][df_dict['singles']['TTOT'] == ttot].copy()
         binary_df = df_dict['binaries'][df_dict['binaries']['TTOT'] == ttot].copy()
         
@@ -445,7 +458,7 @@ class HDF5FileProcessor:
         df.loc[mask_imbh | mask_ns | mask_hv_halo, 'is_funny'] = True
 
     def mark_funny_star_binary(self, binary_df):
-        """标记并返回双星“有趣”目标掩码（通过写入tag_*列，并汇总到is_funny）"""
+        """标记并返回双星"有趣"目标掩码（通过写入tag_*列，并汇总到is_funny）"""
         df = binary_df
         low, high = self.config.IMBH_mass_range_msun
         gap_low, gap_high = self.config.PISNe_mass_gap
@@ -525,6 +538,161 @@ class HDF5FileProcessor:
         if 'is_funny' not in df.columns:
             df['is_funny'] = False
         df.loc[combined_mask, 'is_funny'] = True
+
+    def _compute_binding_energy(self, m_bin, m3, r, v_rel_x, v_rel_y, v_rel_z):
+        """
+        计算三体系统的绑定能
+        
+        参数:
+            m_bin: 双星总质量 [Msun]
+            m3: 第三体质量 [Msun]
+            r: 双星质心到第三体的距离 [pc]
+            v_rel_x, v_rel_y, v_rel_z: 相对速度分量 [km/s]
+        
+        返回:
+            E_bind: 绑定能 [Msun * (km/s)^2]，负值表示绑定
+        """
+        # 计算约化质量
+        mu = (m_bin * m3) / (m_bin + m3)
+        
+        # 计算相对速度的模
+        v_rel = np.sqrt(v_rel_x**2 + v_rel_y**2 + v_rel_z**2)
+        
+        # 动能项: (1/2) * mu * v^2
+        E_kin = 0.5 * mu * v_rel**2
+        
+        # 势能项: -G * M_bin * M_3 / r
+        # G = 4.302e-3 pc * (km/s)^2 / Msun
+        G_PCKMSSQ_MSUN = 4.302e-3
+        E_pot = -G_PCKMSSQ_MSUN * m_bin * m3 / r
+        
+        # 总绑定能
+        E_bind = E_kin + E_pot
+        
+        return E_bind
+
+    @log_time(logger)
+    def get_triples_from_hdf5(self, df_dict, ttot):
+        """
+        识别层级三体系统（hierarchical triples）
+        
+        参数:
+            df_dict: 包含 'singles', 'binaries', 'scalars' 的字典
+            ttot: 当前时刻的 TTOT 值
+        
+        返回:
+            triples_df: 包含三体系统信息的 DataFrame，列包括：
+                - Bin cm Name: 双星质心名称
+                - Third_body_Name: 第三体名称
+                - distance_bin_to_3rd[pc]: 双星质心到第三体的距离
+                - E_bind: 绑定能 [Msun * (km/s)^2]
+                - 以及双星和第三体的其他相关信息
+        """
+        # 获取该时刻的数据
+        single_df_at_t, binary_df_at_t, is_valid = self.get_snapshot_at_t(df_dict, ttot)
+        
+        if not is_valid or binary_df_at_t.empty or single_df_at_t.empty:
+            logger.debug(f"No valid data for triples detection at ttot={ttot}")
+            return pd.DataFrame()
+        
+        # 构建单星位置的 KD-Tree
+        single_positions = single_df_at_t[['X [pc]', 'Y [pc]', 'Z [pc]'].copy()].values
+        single_names = single_df_at_t['Name'].values
+        tree = cKDTree(single_positions)
+        
+        # 存储三体系统的列表
+        triples_list = []
+        
+        # 遍历每个双星
+        for idx, binary_row in binary_df_at_t.iterrows():
+            bin_name1 = binary_row['Bin Name1']
+            bin_name2 = binary_row['Bin Name2']
+            bin_cm_name = binary_row['Bin cm Name']
+            bin_pos = np.array([
+                binary_row['Bin cm X [pc]'],
+                binary_row['Bin cm Y [pc]'],
+                binary_row['Bin cm Z [pc]']
+            ])
+            bin_vel = np.array([
+                binary_row['Bin cm V1'],
+                binary_row['Bin cm V2'],
+                binary_row['Bin cm V3']
+            ])
+            m_bin = binary_row['total_mass[solar]']
+            a_bin = binary_row['Bin A[au]']
+            
+            # 估算最大绑定距离：假设第三体以逃逸速度运动
+            # r_max ≈ 2 * G * M_bin / v_esc^2，这里取保守估计
+            # 使用双星半长轴的若干倍作为搜索半径
+            r_max_pc = a_bin / pc_to_AU * 1000  # 1000倍半长轴作为搜索半径
+            
+            # 快速筛选候选单星
+            candidate_indices = tree.query_ball_point(bin_pos, r=r_max_pc)
+            
+            # 排除双星自身成员
+            n_triples_found_for_this_binary = 0
+            for cand_idx in candidate_indices:
+                third_name = single_names[cand_idx]
+                
+                # 跳过双星成员
+                if third_name == bin_name1 or third_name == bin_name2:
+                    continue
+                n_triples_found_for_this_binary += 1
+                
+                # 获取第三体信息
+                third_row = single_df_at_t.iloc[cand_idx]
+                third_pos = single_positions[cand_idx]
+                third_vel = np.array([
+                    third_row['V1'],
+                    third_row['V2'],
+                    third_row['V3']
+                ])
+                m3 = third_row['M']
+                
+                # 计算距离
+                r_vec = third_pos - bin_pos
+                r = np.linalg.norm(r_vec)
+                
+                # 计算相对速度
+                v_rel = third_vel - bin_vel
+                
+                # 计算绑定能
+                E_bind = self._compute_binding_energy(
+                    m_bin, m3, r,
+                    v_rel[0], v_rel[1], v_rel[2]
+                )
+                
+                # 只保留绑定的系统 (E_bind < 0)
+                if E_bind < 0:
+                    triple_info = {
+                        'TTOT': ttot,
+                        'Bin cm Name': bin_cm_name,
+                        'Bin Name1': bin_name1,
+                        'Bin Name2': bin_name2,
+                        'Third_body_Name': third_name,
+                        'cm_distance_bin_to_3rd[pc]': r,
+                        'E_bind[Msun*(km/s)^2]': E_bind,
+                        'Bin total_mass[solar]': m_bin,
+                        'Third_mass[solar]': m3,
+                        'Bin A[au]': a_bin,
+                        'Bin ECC': binary_row['Bin ECC'],
+                        'Bin KW1': binary_row['Bin KW1'],
+                        'Bin KW2': binary_row['Bin KW2'],
+                        'Third_KW': third_row['KW'],
+                    }
+                    triples_list.append(triple_info)
+
+            if len(n_triples_found_for_this_binary) > 1:
+                logger.warning(f"[Multiples] Found {n_triples_found_for_this_binary} stars with Ebind<0 for binary 1,2,cm={bin_name1},{bin_name2},{bin_cm_name} at ttot={ttot}, indicating possible higher-order multiples.")
+
+        # 转换为 DataFrame
+        if triples_list:
+            triples_df = pd.DataFrame(triples_list)
+            logger.info(f"Found {len(triples_df)} hierarchical triples at ttot={ttot}")
+            return triples_df
+        else:
+            logger.debug(f"No hierarchical triples found at ttot={ttot}")
+            return pd.DataFrame()
 
 
 class ContinousFileProcessor:
