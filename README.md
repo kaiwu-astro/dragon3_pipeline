@@ -1,31 +1,149 @@
-# Pipelines of dragon 3 data analysis
+# Dragon3 Pipelines - N-body Simulation Data Analysis
+
+A modular Python package for analyzing and visualizing N-body simulation data from Dragon3 simulations.
 
 ## Installation
 
-clone this repo, and install necessary python packages using
+### For Users
 
-```sh
-pip install -r requirements.txt
+Clone this repository and install the package:
+
+```bash
+git clone https://github.com/kaiwu-astro/dragon3_pipeline.git
+cd dragon3_pipeline
+pip install -e .
 ```
 
-## Prepare
-1. Open `plot_nbody.py` . Edit paths in `ConfigManager`. Most importantly:
-   - `pathof`: simulation_name: path_to_simulation_directory. You can freely name the sim.
-   - `input_file_path_of`: put the path of the initial condition files. Some plots uses the initial values for data processing.
-   - `figname_prefix`: prefix of every figure filename. Put something to make yourself & collaborators clear
-   - `plot_dir`: path to save figures. [TODO: now save all figures in a single dir; sometimes cause slow speed to load with `ls`; will seperate into subdirs later]
-   - `processes_count`: how many HDF5 files do you wish to analyze at the same time? More = faster, but at the risk of blowing up your computer's memory. In my exp, 40 uses 100 GB. Also, the number should not go beyond #cores of CPU.
-2. Open `dragon3_jpg_to_movie.sh`,
-   - change `PLOT_DIR` in the beginning
-   - change `MAX_PARALLEL_JOBS` to restrict how many movie to make at the same time. More = uses more GPU/CPU memory. In my exp 15 = 8GB.
-   - change the `module load` command if you are using LMOD (e.g., on a supercomputer), to load `FFmpeg`. Video-making would be much faster if `FFmpeg` is compiled with GPU acclerations (e.g., for NVIDIA GPUs, check with `ffmpeg -encoders | grep nvenc` to see if `hevc_nvenc` is there). In case of no GPU support, uncomment line #88 and comment #89, to use the pure CPU command.
+### For Developers
 
-## Usage
-1. `python3 plot_nbody.py` . Optional param: `python3 plot_nbody.py --skip-until=[number or 'last']`. See comments in `ConfigManager._parse_argv`.
-2. after all plots are done, `bash dragon3_jpg_to_movie.sh` to make movies. 
+Install with development dependencies:
 
-# Structure:
-1. `plot_nbody.py` depend on `nbody_tools.py` and imports everything from it.
-2. `_dragon3_jpg_to_movie_serial.sh` is a serial version of `dragon3_jpg_to_movie.sh`. It is slow (can take 3 hours to finish all movies as of 5 June 2025), and is mainly for debug.
+```bash
+pip install -e ".[dev]"
+```
 
-Feel free to ask any question by opening an issue thread. 
+## Quick Start
+
+### Using the Command Line
+
+```bash
+# Run with default configuration
+python -m dragon3_pipelines
+
+# Or use the legacy script (backward compatible)
+python plot_nbody.py --skip-until=100
+
+# Create movies from plots
+bash dragon3_jpg_to_movie.sh
+```
+
+### Using as a Python Package
+
+```python
+from dragon3_pipelines import main, SimulationPlotter
+from dragon3_pipelines.config import ConfigManager
+from dragon3_pipelines.io import HDF5FileProcessor
+from dragon3_pipelines.analysis import ParticleTracker
+from dragon3_pipelines.visualization import SingleStarVisualizer
+
+# Create custom configuration
+config = ConfigManager()
+config.processes_count = 20
+
+# Use visualizers
+visualizer = SingleStarVisualizer(hdf5_processor, config)
+```
+
+## Configuration
+
+### Using YAML Configuration
+
+Create a custom `config.yaml`:
+
+```yaml
+paths:
+  simulations:
+    my_sim: "/path/to/simulation"
+  plot_dir: "/path/to/plots"
+
+processing:
+  processes_count: 40
+  skip_existing_plot: true
+```
+
+Load it in your code:
+
+```python
+from dragon3_pipelines.config import load_config
+config = load_config("config.yaml")
+```
+
+### Legacy Configuration
+
+For backward compatibility, you can still edit paths directly in `plot_nbody.py` as before.
+
+## Package Structure
+
+```
+dragon3_pipelines/
+├── config/          # Configuration management
+├── io/              # Data I/O (HDF5, text files)
+├── analysis/        # Particle tracking, physics calculations
+├── visualization/   # Plotting and visualization
+├── utils/           # Utility functions
+└── scripts/         # Shell scripts for movie generation
+```
+
+## Features
+
+- **Modular Design**: Clean separation of I/O, analysis, and visualization
+- **Type Annotations**: Full type hints for better IDE support
+- **Backward Compatible**: All old scripts and imports still work
+- **Configurable**: YAML-based configuration with sensible defaults
+- **Parallel Processing**: Multi-process support for analyzing large datasets
+- **Comprehensive Testing**: 87+ unit tests covering all modules
+
+## Usage Examples
+
+### Analyze HDF5 Files
+
+```python
+from dragon3_pipelines.io import HDF5FileProcessor
+from dragon3_pipelines.config import ConfigManager
+
+config = ConfigManager()
+processor = HDF5FileProcessor(config, "my_sim")
+df_singles, df_binaries = processor.get_hdf5_dataframes()
+```
+
+### Track Particles
+
+```python
+from dragon3_pipelines.analysis import ParticleTracker
+
+tracker = ParticleTracker(config, "my_sim")
+particle_history = tracker.get_particle_new_df_all(particle_id=12345)
+```
+
+### Create Visualizations
+
+```python
+from dragon3_pipelines.visualization import BinaryStarVisualizer
+
+viz = BinaryStarVisualizer(hdf5_processor, config)
+viz.create_mass_ratio_vs_a_scatter(df_binaries, time=100.0)
+```
+
+## Command Line Options
+
+- `--skip-until=N`: Start processing from time N
+- `--skip-until=last`: Resume from last processed time
+- `--debug`: Enable debug logging
+
+## Contributing
+
+Feel free to open issues or submit pull requests!
+
+## License
+
+See LICENSE file for details. 
