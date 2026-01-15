@@ -1,0 +1,122 @@
+# Dragon3 Pipelines Default Configuration
+
+# Path configurations for different simulations
+paths:
+  simulations:
+    "0sb": "/p/scratch/madnuc/wu13/mar17-dragon3-start/00softBinary-5hardBinary"
+    "20sb": "/p/scratch/madnuc/wu13/mar17-dragon3-start/20softBinary-5hardBinary"
+    "60sb": "/p/scratch/madnuc/wu13/mar17-dragon3-start/60softBinary-5hardBinary"
+  
+  # Input file paths
+  input_files:
+    "0sb": "N1m-Dragon3.inp.init"
+    "20sb": "N1m-Dragon3.inp.init"
+    "60sb": "N1m-Dragon3.inp.init"
+  
+  # Plot directory
+  plot_dir: "/p/home/jusers/wu13/juwels/scratch/plot"
+  
+  # Cache directory suffix
+  cache_dir_suffix: "/particle_df_cache"
+
+# Figure name prefixes
+figure_prefixes:
+  "0sb": "dragon3_1m_5hb_0sb_Apr2025"
+  "20sb": "dragon3_1m_5hb_20sb_Apr2025"
+  "60sb": "dragon3_1m_5hb_60sb_Apr2025"
+
+# Processing options
+processing:
+  skip_until:
+    "0sb": 700
+    "20sb": 60
+    "60sb": 0
+  skip_existing_plot: true
+  plot_only_int_nbody_time: true
+  close_figure_in_ipython: false
+  processes_count: 40
+  tasks_per_child: 3
+
+# Lagrangian radii percentages to plot
+selected_lagr_percent:
+  - "<RC"
+  - "10%"
+  - "30%"
+  - "50%"
+  - "70%"
+  - "90%"
+  - "95%"
+
+# Physical constants and thresholds
+physics:
+  ECLOSE_INPUT: 1.0  # Binding energy per unit mass for hard binary (positive)
+  universe_age_myr: 13800.0
+  IMBH_mass_range_msun: [100, 100000]
+  extreme_mass_ratio_upper: 0.1
+  high_BH_ecc_lower: 0.1
+  PISNe_mass_gap: [64, 161]
+
+# Stellar type mappings (KW codes)
+stellar_types:
+  -1: "PMS"
+  0: "LMS"
+  1: "MS"
+  2: "HG"
+  3: "GB"
+  4: "CHeB"
+  5: "EAGB"
+  6: "TPAGB"
+  7: "HeMS"
+  8: "HeHG"
+  9: "HeGB"
+  10: "HeWD"
+  11: "COWD"
+  12: "ONeWD"
+  13: "NS"
+  14: "BH"
+  15: "MLR"
+
+# Compact object KW codes
+compact_object_KW: [10, 11, 12, 13, 14]
+
+# Interesting binary star types
+wow_binary_st_list:
+  - "BH-NS"
+
+# Plot limits for various quantities
+limits:
+  Distance_to_cluster_center_pc: [0.001, 10000]
+  Bin_A_au: [0.001, 100000]
+  mass_ratio: [0.0005, 1.01]
+  M: [0.06, 1050]
+  Bin_ECC: [0.0001, 1.2]
+  Teff: [1000, 1050000]
+  L: [0.000009, 100000000]
+  position_pc_lim: [-15, 15]
+  position_pc_lim_MAX: [-500, 500]
+  Ebind_kT: [2.0e-7, 500]
+  tau_gw_Myr: [9, 14000]
+  velocity_kmps_lim: [-200, 200]
+  sum_of_radius_au: [1.0e-7, 1]
+  peri_au: [0.0001, 100000]
+
+# Column name to label mappings
+column_labels:
+  Distance_to_cluster_center_pc: "r [pc]"
+  Bin_A_au: "a [au]"
+  Bin_ECC: "e"
+  mass_ratio: "mass ratio"
+  primary_mass_solar: "primary mass [M$_\\odot$]"
+  secondary_mass_solar: "secondary mass [M$_\\odot$]"
+  total_mass_solar: "binary total mass [M$_\\odot$]"
+  M: "mass [M$_\\odot$]"
+  Ebind_kT: "$E_{bind}/kT$"
+  Teff: "$T_{eff}$ [K]"
+  L: "$L$ [L$_\\odot$]"
+  tau_gw_Myr: "$\\tau_{gw}$ [Myr]"
+  V1: "$V_{x}$ [km/s]"
+  V2: "$V_{y}$ [km/s]"
+  V3: "$V_{z}$ [km/s]"
+  Bin_cm_V1: "Bin $V_{x,cm}$ [km/s]"
+  Bin_cm_V2: "Bin $V_{y,cm}$ [km/s]"
+  Bin_cm_V3: "Bin $V_{z,cm}$ [km/s]"
