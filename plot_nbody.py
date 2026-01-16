@@ -11,8 +11,8 @@ For new code, please use:
 """
 import sys
 
-if sys.version_info < (3, 10):
-    raise RuntimeError("Need python >= 3.10")
+if sys.version_info < (3, 11):
+    raise RuntimeError("Need python >= 3.11")
 
 import os
 os.environ["OPENBLAS_NUM_THREADS"] = "4"
