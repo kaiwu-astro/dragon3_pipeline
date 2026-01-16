@@ -33,6 +33,16 @@ except NameError:
         logger.setLevel(logging.INFO)
 
 
+def _init_worker_logging():
+    """Initialize logging for worker processes in multiprocessing Pool"""
+    _logger = logging.getLogger()
+    if not _logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        _logger.addHandler(handler)
+        _logger.setLevel(logging.INFO)
+
+
 class SimulationPlotter:
     """模拟处理类，管理整个模拟处理流程"""
     
@@ -157,7 +167,8 @@ class SimulationPlotter:
             ctx = multiprocessing.get_context('forkserver')
             with ctx.Pool(
                 processes=self.config.processes_count, 
-                maxtasksperchild=self.config.tasks_per_child
+                maxtasksperchild=self.config.tasks_per_child,
+                initializer=_init_worker_logging
             ) as pool:
                 list(
                     tqdm(

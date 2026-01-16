@@ -4,6 +4,7 @@ import gc
 import logging
 import multiprocessing
 import os
+import sys
 import time
 from glob import glob
 from typing import Any, Dict, Optional, Tuple
@@ -14,6 +15,16 @@ from tqdm.auto import tqdm
 
 from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
+
+
+def _init_worker_logging():
+    """Initialize logging for worker processes in multiprocessing Pool"""
+    logger = logging.getLogger()
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
 
 
 class ParticleTracker:
@@ -209,7 +220,8 @@ class ParticleTracker:
         ctx = multiprocessing.get_context('forkserver')
         with ctx.Pool(
             processes=self.config.processes_count, 
-            maxtasksperchild=self.config.tasks_per_child
+            maxtasksperchild=self.config.tasks_per_child,
+            initializer=_init_worker_logging
         ) as pool:
             # imap returns result in order of input
             iterator = pool.imap(self._process_single_hdf5_for_particle, tasks)
