@@ -53,40 +53,20 @@ class ParticleTracker:
         
         # Extract records from binary data
         # Check if particle appears as member 1 or member 2 of a binary
+        # Note: this is necessary due to a star may sometimes be Bin 1 and sometimes Bin 2
+        #       even in the same hdf5 file
         binary_as_1 = binary_df_all[binary_df_all['Bin Name1'] == particle_name].copy()
+        binary_as_1['state'] = 'binary'
+        binary_as_1['companion_name'] = binary_as_1['Bin Name2']
         binary_as_2 = binary_df_all[binary_df_all['Bin Name2'] == particle_name].copy()
-        if not binary_as_1.empty:
-            binary_as_1['state'] = 'binary'
-            binary_as_1['companion_name'] = binary_as_1['Bin Name2']
-            _binary = binary_as_1
-        elif not binary_as_2.empty:
-            binary_as_2['state'] = 'binary'
-            binary_as_2['companion_name'] = binary_as_2['Bin Name1']
-            _binary = binary_as_2
-        
-        if (not binary_as_1.empty) and (not binary_as_2.empty):
-            # Particle appears as both Bin Name1 and Bin Name2 - this is an error
-            try:
-                scalars_df = df_dict.get('scalars', None)
-                if scalars_df is None:
-                    scalar_ttot = None
-                elif 'TTOT' in scalars_df.columns:
-                    scalar_ttot = np.array(scalars_df['TTOT'].unique())
-                else:
-                    scalar_ttot = np.array(scalars_df.index.unique())
-            except Exception as e:
-                logger.warning(f"Warning: Failed to extract TTOT from df_dict['scalars']: {e}")
-                scalar_ttot = None
+        binary_as_2['state'] = 'binary'
+        binary_as_2['companion_name'] = binary_as_2['Bin Name1']
 
-            t1 = np.array(binary_as_1['TTOT'].unique()) if 'TTOT' in binary_as_1.columns else None
-            t2 = np.array(binary_as_2['TTOT'].unique()) if 'TTOT' in binary_as_2.columns else None
-            logger.error(
-                f"Assertion failed: particle {particle_name} appears as both Bin Name1 and Bin Name2. "
-                f"binary_as_1 TTOT={t1}, binary_as_2 TTOT={t2}, scalars TTOT={scalar_ttot}"
-            )
-            raise AssertionError(
-                f"particle {particle_name} appears as both Bin Name1 and Bin Name2 at TTOT={scalar_ttot}"
-            )
+        _binary = pd.concat([binary_as_1, binary_as_2], ignore_index=True)
+
+        if not _binary['TTOT'].is_unique:
+            logger.warning(f"Warning: Particle {particle_name} is found in both components at TTOT = {_binary['TTOT'][_binary['TTOT'].duplicated()].unique()}")
+            _binary = _binary.drop_duplicates(subset=['TTOT'], keep='first')
         
         # Merge all records
         if binary_as_1.empty and binary_as_2.empty:
