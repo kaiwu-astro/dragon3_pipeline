@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Astronomy",
 ]
 
@@ -56,7 +57,7 @@ dragon3_pipelines = ["config/*.yaml"]
 
 [tool.black]
 line-length = 100
-target-version = ['py311']
+target-version = ['py311', 'py312', 'py313']
 
 [tool.ruff]
 line-length = 100
