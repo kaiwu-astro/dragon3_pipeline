@@ -231,13 +231,13 @@ class TestHDF5Functions:
 class TestHDF5FileProcessor:
     """Test HDF5FileProcessor class"""
     
-    def test_get_hdf5_name_time(self):
+    def test_get_hdf5_file_time_from_filename(self):
         """Test extracting time from HDF5 filename"""
         config_mock = Mock()
         processor = HDF5FileProcessor(config_mock)
         
         path = "/path/to/snap.40_1.234.h5part"
-        time = processor.get_hdf5_name_time(path)
+        time = processor.get_hdf5_file_time_from_filename(path)
         
         assert time == 1.234
     

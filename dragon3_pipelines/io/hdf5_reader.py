@@ -26,6 +26,9 @@ class HDF5FileProcessor:
         """
         Load and preprocess HDF5 data. Extract multiple DataFrames from a single HDF5 file containing snapshots at multiple times.
         
+        Note: One HDF5 file (.h5part) contains MULTIPLE snapshots (typically 8) at different time points.
+        Each snapshot represents the simulation state at one specific TTOT value.
+        
         Args:
             hdf5_path: Path to HDF5 file
             simu_name: Used to get initial condition file path and read N0
@@ -33,6 +36,7 @@ class HDF5FileProcessor:
         
         Returns:
             df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
+                     Each DataFrame contains data for ALL snapshots in this HDF5 file
         """
         from dragon3_pipelines.io.text_parsers import get_valueStr_of_namelist_key, get_scale_dict_from_hdf5_df, dataframes_from_hdf5_file
         from dragon3_pipelines.io.text_parsers import tau_gw
@@ -145,18 +149,27 @@ class HDF5FileProcessor:
 
         return df_dict
     
-    def get_hdf5_name_time(self, hdf5_path: str) -> float:
-        """Extract snapshot time from filename"""
+    def get_hdf5_file_time_from_filename(self, hdf5_path: str) -> float:
+        """Extract approximate snapshot time from HDF5 filename
+        
+        Note: This extracts the time encoded in the filename, which represents
+        the approximate time of snapshots contained in this HDF5 file.
+        Each HDF5 file contains multiple snapshots at different times.
+        """
         return float(hdf5_path.split('snap.40_')[-1].split('.h5part')[0])
     
     @log_time(logger)
     def get_snapshot_at_t(self, df_dict: Dict[str, pd.DataFrame], ttot: float) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], bool]:
         """
-        Get data at a specific time
+        Get snapshot data at a specific time point
+        
+        Note: This extracts data for ONE snapshot (one moment in time) from the 
+        df_dict that contains multiple snapshots from an HDF5 file.
         
         Args:
             df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
-            ttot: Time point to retrieve
+                     (obtained from read_file, contains MULTIPLE snapshots)
+            ttot: Time point to retrieve (one specific snapshot)
         
         Returns:
             single_df: Single star DataFrame at this time

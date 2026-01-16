@@ -69,9 +69,9 @@ class TestParticleTracker:
         assert tracker.config == mock_config
         assert tracker.hdf5_file_processor is not None
     
-    def test_get_particle_df_from_snap_single_only(self, particle_tracker, sample_df_dict):
+    def test_get_particle_df_from_hdf5_file_single_only(self, particle_tracker, sample_df_dict):
         """Test tracking a particle that remains single"""
-        result = particle_tracker.get_particle_df_from_snap(sample_df_dict, 2000)
+        result = particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, 2000)
         
         # Particle 2000 appears in singles at TTOT=0.0 and as Bin Name2 at TTOT=2.0
         # So we get 2 rows after merge
@@ -81,9 +81,9 @@ class TestParticleTracker:
         assert len(single_row) == 1
         assert single_row['Name'].iloc[0] == 2000
     
-    def test_get_particle_df_from_snap_single_and_binary(self, particle_tracker, sample_df_dict):
+    def test_get_particle_df_from_hdf5_file_single_and_binary(self, particle_tracker, sample_df_dict):
         """Test tracking a particle that goes from single to binary"""
-        result = particle_tracker.get_particle_df_from_snap(sample_df_dict, 1000)
+        result = particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, 1000)
         
         # Should have 3 rows: TTOT 0.0, 1.0, 2.0
         assert len(result) == 3
@@ -94,16 +94,16 @@ class TestParticleTracker:
         assert len(binary_rows) == 1
         assert binary_rows['companion_name'].iloc[0] == 2000
     
-    def test_get_particle_df_from_snap_not_found(self, particle_tracker, sample_df_dict):
+    def test_get_particle_df_from_hdf5_file_not_found(self, particle_tracker, sample_df_dict):
         """Test tracking a non-existent particle"""
-        result = particle_tracker.get_particle_df_from_snap(sample_df_dict, 99999)
+        result = particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, 99999)
         
         assert result.empty
     
-    def test_get_particle_df_from_snap_both_binary_members(self, particle_tracker):
-        """Test error handling when particle appears as both binary members"""
-        # Create invalid data where particle is both Name1 and Name2
-        invalid_df_dict = {
+    def test_get_particle_df_from_hdf5_file_both_binary_members(self, particle_tracker):
+        """Test graceful handling and deduplication when particle appears as both binary members"""
+        # Create data where particle is both Name1 and Name2
+        test_df_dict = {
             'singles': pd.DataFrame({
                 'Name': [1000],
                 'TTOT': [0.0],
@@ -116,8 +116,12 @@ class TestParticleTracker:
             'scalars': pd.DataFrame({'TTOT': [0.0, 1.0]}),
         }
         
-        with pytest.raises(AssertionError, match="appears as both Bin Name1 and Bin Name2"):
-            particle_tracker.get_particle_df_from_snap(invalid_df_dict, 1000)
+        # Should not raise error, but should log warning and deduplicate
+        result = particle_tracker.get_particle_df_from_hdf5_file(test_df_dict, 1000)
+        
+        # Should have deduplicated the TTOT=1.0 entry
+        assert not result.empty
+        assert result['TTOT'].is_unique
     
     def test_get_particle_summary_empty(self, particle_tracker):
         """Test summary with empty DataFrame"""
@@ -146,21 +150,21 @@ class TestParticleTracker:
         assert result['final_mass'] == 9.0
         assert result['stellar_types'] == [1, 2]
     
-    def test_process_single_snap_for_particle(self, particle_tracker, sample_df_dict):
+    def test_process_single_hdf5_for_particle(self, particle_tracker, sample_df_dict):
         """Test worker function for parallel processing"""
         with patch.object(particle_tracker.hdf5_file_processor, 'read_file', return_value=sample_df_dict):
-            result = particle_tracker._process_single_snap_for_particle(
-                ('/path/to/snap.h5', 1000, 'test_simu')
+            result = particle_tracker._process_single_hdf5_for_particle(
+                ('/path/to/file.h5', 1000, 'test_simu')
             )
             
             assert not result.empty
             assert 1000 in result['Name'].values
     
-    def test_process_single_snap_for_particle_error(self, particle_tracker):
+    def test_process_single_hdf5_for_particle_error(self, particle_tracker):
         """Test error handling in worker function"""
         with patch.object(particle_tracker.hdf5_file_processor, 'read_file', side_effect=Exception("Test error")):
-            result = particle_tracker._process_single_snap_for_particle(
-                ('/path/to/snap.h5', 1000, 'test_simu')
+            result = particle_tracker._process_single_hdf5_for_particle(
+                ('/path/to/file.h5', 1000, 'test_simu')
             )
             
             assert result.empty
