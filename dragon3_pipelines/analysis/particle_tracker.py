@@ -151,7 +151,7 @@ class ParticleTracker:
             particle_df = self.get_particle_df_from_snap(df_dict, particle_name)
             return particle_df
         except Exception as e:
-            logger.error(f"Error processing {hdf5_path} for particle {particle_name}: {e}")
+            logger.error(f"Error processing {hdf5_path} for particle {particle_name}: {type(e).__name__}: {e}")
             return pd.DataFrame()
 
     @log_time(logger)

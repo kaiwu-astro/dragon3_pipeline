@@ -85,38 +85,38 @@ wow_binary_st_list:
 
 # Plot limits for various quantities
 limits:
-  Distance_to_cluster_center_pc: [0.001, 10000]
-  Bin_A_au: [0.001, 100000]
-  mass_ratio: [0.0005, 1.01]
-  M: [0.06, 1050]
-  Bin_ECC: [0.0001, 1.2]
-  Teff: [1000, 1050000]
-  L: [0.000009, 100000000]
-  position_pc_lim: [-15, 15]
-  position_pc_lim_MAX: [-500, 500]
-  Ebind_kT: [2.0e-7, 500]
-  tau_gw_Myr: [9, 14000]
-  velocity_kmps_lim: [-200, 200]
-  sum_of_radius_au: [1.0e-7, 1]
-  peri_au: [0.0001, 100000]
+  'Distance_to_cluster_center[pc]': [0.001, 10000.0]
+  'Bin A[au]': [0.001, 100000.0]
+  'mass_ratio': [0.0005, 1.01]
+  'M': [0.06, 1050.0]
+  'Bin ECC': [0.0001, 1.2]
+  'Teff*': [1000.0, 1050000.0]
+  'L*': [0.000009, 100000000.0]
+  'position_pc_lim': [-15.0, 15.0]
+  'position_pc_lim_MAX': [-500.0, 500.0]
+  'Ebind/kT': [2.0e-7, 500.0]
+  'tau_gw[Myr]': [9.0, 14000.0]
+  'velocity_kmps_lim': [-200.0, 200.0]
+  'sum_of_radius[au]': [1.0e-7, 1.0]
+  'peri[au]': [0.0001, 100000.0]
 
 # Column name to label mappings
 column_labels:
-  Distance_to_cluster_center_pc: "r [pc]"
-  Bin_A_au: "a [au]"
-  Bin_ECC: "e"
-  mass_ratio: "mass ratio"
-  primary_mass_solar: "primary mass [M$_\\odot$]"
-  secondary_mass_solar: "secondary mass [M$_\\odot$]"
-  total_mass_solar: "binary total mass [M$_\\odot$]"
-  M: "mass [M$_\\odot$]"
-  Ebind_kT: "$E_{bind}/kT$"
-  Teff: "$T_{eff}$ [K]"
-  L: "$L$ [L$_\\odot$]"
-  tau_gw_Myr: "$\\tau_{gw}$ [Myr]"
-  V1: "$V_{x}$ [km/s]"
-  V2: "$V_{y}$ [km/s]"
-  V3: "$V_{z}$ [km/s]"
-  Bin_cm_V1: "Bin $V_{x,cm}$ [km/s]"
-  Bin_cm_V2: "Bin $V_{y,cm}$ [km/s]"
-  Bin_cm_V3: "Bin $V_{z,cm}$ [km/s]"
+  'Distance_to_cluster_center[pc]': "r [pc]"
+  'Bin A[au]': "a [au]"
+  'Bin ECC': "e"
+  'mass_ratio': "mass ratio"
+  'primary_mass[solar]': "primary mass [M$_\\odot$]"
+  'secondary_mass[solar]': "secondary mass [M$_\\odot$]"
+  'total_mass[solar]': "binary total mass [M$_\\odot$]"
+  'M': "mass [M$_\\odot$]"
+  'Ebind/kT': "$E_{bind}/kT$"
+  'Teff*': "$T_{eff}$ [K]"
+  'L*': "$L$ [L$_\\odot$]"
+  'tau_gw[Myr]': "$\\tau_{gw}$ [Myr]"
+  'V1': "$V_{x}$ [km/s]"
+  'V2': "$V_{y}$ [km/s]"
+  'V3': "$V_{z}$ [km/s]"
+  'Bin cm V1': "Bin $V_{x,cm}$ [km/s]"
+  'Bin cm V2': "Bin $V_{y,cm}$ [km/s]"
+  'Bin cm V3': "Bin $V_{z,cm}$ [km/s]"
