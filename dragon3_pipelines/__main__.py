@@ -22,6 +22,7 @@ from dragon3_pipelines.config import ConfigManager
 from dragon3_pipelines.io import HDF5FileProcessor, LagrFileProcessor
 from dragon3_pipelines.visualization import HDF5Visualizer, LagrVisualizer
 from dragon3_pipelines.analysis import ParticleTracker
+from dragon3_pipelines.utils import init_worker_logging
 
 # Setup logger
 try:
@@ -31,16 +32,6 @@ except NameError:
     if not logger.handlers:
         logger.addHandler(logging.StreamHandler(sys.stdout))
         logger.setLevel(logging.INFO)
-
-
-def _init_worker_logging():
-    """Initialize logging for worker processes in multiprocessing Pool"""
-    _logger = logging.getLogger()
-    if not _logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-        _logger.addHandler(handler)
-        _logger.setLevel(logging.INFO)
 
 
 class SimulationPlotter:
@@ -168,7 +159,7 @@ class SimulationPlotter:
             with ctx.Pool(
                 processes=self.config.processes_count, 
                 maxtasksperchild=self.config.tasks_per_child,
-                initializer=_init_worker_logging
+                initializer=init_worker_logging
             ) as pool:
                 list(
                     tqdm(

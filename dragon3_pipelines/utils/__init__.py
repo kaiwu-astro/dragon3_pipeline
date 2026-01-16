@@ -3,7 +3,7 @@
 from dragon3_pipelines.utils.serialization import save, read
 from dragon3_pipelines.utils.shell import get_output
 from dragon3_pipelines.utils.misc import can_convert_to_float
-from dragon3_pipelines.utils.logging import log_time
+from dragon3_pipelines.utils.logging import log_time, init_worker_logging
 from dragon3_pipelines.utils.color import BlackbodyColorConverter
 
 __all__ = [
@@ -12,5 +12,6 @@ __all__ = [
     'get_output',
     'can_convert_to_float',
     'log_time',
+    'init_worker_logging',
     'BlackbodyColorConverter',
 ]
