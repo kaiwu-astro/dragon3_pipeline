@@ -131,14 +131,14 @@ class SimulationPlotter:
             self.plot_lagr(simu_name)
 
             # 获取所有快照文件
-            hdf5_snap_files = sorted(
+            hdf5_files = sorted(
                 glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
                 key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
             )
             WAIT_SNAPSHOT_AGE_HOUR = 24
             cutoff = time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600
-            hdf5_snap_files = [
-                fn for fn in hdf5_snap_files
+            hdf5_files = [
+                fn for fn in hdf5_files
                 if os.path.getmtime(fn) <= cutoff
             ]
             
@@ -156,8 +156,8 @@ class SimulationPlotter:
             ) as pool:
                 list(
                     tqdm(
-                        pool.imap(process_file_partial, hdf5_snap_files), 
-                        total=len(hdf5_snap_files), 
+                        pool.imap(process_file_partial, hdf5_files), 
+                        total=len(hdf5_files), 
                         desc=f'{simu_name} HDF5 Snap#'
                     )
                 )
