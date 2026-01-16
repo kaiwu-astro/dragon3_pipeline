@@ -159,7 +159,7 @@ def function_name(param1: str, param2: int) -> bool:
 
 ## 关键术语
 
-> 详见 `docs/terminology.md`
+详见 `docs/terminology.md`
 
 ### Snapshot vs HDF5 File
 
@@ -206,7 +206,7 @@ stellar_types:
 
 ## API 兼容性约束
 
-> 详见 `docs/api.md`
+详见 `docs/api.md`
 
 ### 公共接口必须保持向后兼容
 
