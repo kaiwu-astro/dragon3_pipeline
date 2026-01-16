@@ -1,5 +1,6 @@
 """Particle tracking functionality for following individual particles through simulation"""
 
+import gc
 import logging
 import multiprocessing
 import os
@@ -269,3 +270,64 @@ class ParticleTracker:
             return new_df_all
         else:
             return old_df_all
+
+    @log_time(logger)
+    def save_every_particle_df_of_sim(self, simu_name: str) -> None:
+        """
+        Get and save particle dataframes for all particles in the simulation
+        
+        Args: 
+            simu_name: Name of the simulation
+        """
+        # 1. Get all snapshot files
+        hdf5_files = sorted(
+            glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
+            key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
+        )
+        if not hdf5_files:
+            logger.error(f"No snapshot files found for simulation {simu_name}")
+            return
+        
+        # 2. Find the t=0 snapshot (first snapshot)
+        t0_snapshot = hdf5_files[0]
+        
+        # 3. Read t=0 snapshot and get all particle names
+        try:
+            df_dict = self.hdf5_file_processor.read_file(t0_snapshot, simu_name)
+            single_df = df_dict['singles']
+            
+            if single_df.empty or 'Name' not in single_df.columns:
+                logger.error(f"No particles found in initial snapshot {t0_snapshot}")
+                return
+            
+            all_particle_names = single_df['Name'].unique()
+            logger.info(f"Found {len(all_particle_names)} particles in simulation {simu_name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to read initial snapshot {t0_snapshot}: {type(e).__name__}: {e}")
+            return
+        
+        # 4. Process each particle
+        successful_count = 0
+        failed_count = 0
+        
+        for particle_name in tqdm(all_particle_names, desc=f"Saving all particles in {simu_name}"):
+            try:
+                particle_df = self.get_particle_df_all(simu_name, particle_name, update=True)
+                
+                if not particle_df.empty:
+                    successful_count += 1
+                else:
+                    logger.warning(f"Empty dataframe returned for particle {particle_name}")
+                    failed_count += 1
+                    
+            except Exception as e:
+                logger.error(f"Failed to process particle {particle_name}: {type(e).__name__}: {e}")
+                failed_count += 1
+            
+            finally:
+                # Explicitly release memory
+                del particle_df
+                gc.collect()
+        
+        logger.info(f"Completed saving particles in {simu_name}: {successful_count} successful, {failed_count} failed")
