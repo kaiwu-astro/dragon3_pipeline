@@ -156,7 +156,7 @@ class ParticleTracker:
             return pd.DataFrame()
 
     @log_time(logger)
-    def get_particle_new_df_all(self, simu_name: str, particle_name: int, 
+    def get_particle_df_all(self, simu_name: str, particle_name: int, 
                                update: bool = True) -> pd.DataFrame:
         """
         Get complete evolution history of a particle throughout the simulation

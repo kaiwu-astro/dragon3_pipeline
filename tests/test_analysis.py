@@ -167,19 +167,19 @@ class TestParticleTracker:
     
     @patch('dragon3_pipelines.analysis.particle_tracker.glob')
     @patch('os.path.exists')
-    def test_get_particle_new_df_all_no_cache(self, mock_exists, mock_glob, particle_tracker, mock_config):
+    def test_get_particle_df_all_no_cache(self, mock_exists, mock_glob, particle_tracker, mock_config):
         """Test getting particle data with no existing cache"""
         mock_exists.return_value = False
         mock_glob.return_value = []
         
-        result = particle_tracker.get_particle_new_df_all('test_simu', 1000, update=False)
+        result = particle_tracker.get_particle_df_all('test_simu', 1000, update=False)
         
         assert result.empty
     
     @patch('dragon3_pipelines.analysis.particle_tracker.glob')
     @patch('pandas.read_feather')
     @patch('os.path.exists')
-    def test_get_particle_new_df_all_with_cache(self, mock_exists, mock_read_feather, 
+    def test_get_particle_df_all_with_cache(self, mock_exists, mock_read_feather, 
                                                 mock_glob, particle_tracker):
         """Test getting particle data with existing cache"""
         cached_df = pd.DataFrame({
@@ -192,7 +192,7 @@ class TestParticleTracker:
         mock_read_feather.return_value = cached_df
         mock_glob.return_value = []
         
-        result = particle_tracker.get_particle_new_df_all('test_simu', 1000, update=False)
+        result = particle_tracker.get_particle_df_all('test_simu', 1000, update=False)
         
         assert len(result) == 1
         assert result['Name'].iloc[0] == 1000
