@@ -294,6 +294,7 @@ class ParticleTracker:
         
         for particle_name in tqdm(all_particle_names, desc=f"Saving all particles in {simu_name}"):
             try:
+                particle_df = None
                 particle_df = self.get_particle_df_all(simu_name, particle_name, update=True)
                 
                 if not particle_df.empty:
@@ -307,8 +308,6 @@ class ParticleTracker:
                 failed_count += 1
             
             finally:
-                # Explicitly release memory
-                del particle_df
                 gc.collect()
         
         logger.info(f"Completed saving particles in {simu_name}: {successful_count} successful, {failed_count} failed")
