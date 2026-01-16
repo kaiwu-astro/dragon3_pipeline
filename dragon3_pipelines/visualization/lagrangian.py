@@ -9,8 +9,6 @@ import seaborn as sns
 
 from dragon3_pipelines.visualization.base import BaseContinousFileVisualizer, add_grid
 
-logger = logging.getLogger(__name__)
-
 
 class LagrVisualizer(BaseContinousFileVisualizer):
     """

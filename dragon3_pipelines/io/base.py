@@ -8,8 +8,6 @@ import pandas as pd
 
 from dragon3_pipelines.utils import get_output
 
-logger = logging.getLogger(__name__)
-
 
 class ContinousFileProcessor:
     """Base class for processing continuous file outputs from simulations"""
@@ -23,6 +21,7 @@ class ContinousFileProcessor:
 
     def concat_file(self, simu_name: str) -> None:
         """Concatenate all files with the given basename into a temporary file"""
+        logger = logging.getLogger(__name__)
         gather_file_cmd = f'cd {self.config.pathof[simu_name]};' + \
         f'''tmpf=`mktemp --suffix=.{self.file_basename}`; find . -name '{self.file_basename}*' | xargs ls | xargs cat > $tmpf; echo $tmpf'''
         self.file_path = get_output(gather_file_cmd)[0]
@@ -30,6 +29,7 @@ class ContinousFileProcessor:
     
     def read_file(self, simu_name: str):
         """Read the concatenated file. Must be implemented by subclass."""
+        logger = logging.getLogger(__name__)
         self.concat_file(simu_name)
         logger.debug(f'Loading gathered self.file_basename at {self.file_path}')
         raise NotImplementedError("Subclass must implement this method")
@@ -40,6 +40,7 @@ class ContinousFileProcessor:
         In data like [1.0, 2.1, 3.2, 4.3, 5.7, 3.5, 4.6, 5.9, 4.7, 4.8, 7.1], 
         remove 3.5, 4.6, 4.7, 4.8
         """
+        logger = logging.getLogger(__name__)
         is_forwarding = np.array([df[timecol][:i+1].max() == v for i, v in df[timecol].items()])
         if not is_forwarding.all():
             logger.warning(f"[{self.file_basename}] Warning: Found {len(is_forwarding) - is_forwarding.sum()} descending entries in {timecol}, removing")

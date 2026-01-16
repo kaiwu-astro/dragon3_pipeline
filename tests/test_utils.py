@@ -89,9 +89,7 @@ class TestLogging:
     
     def test_log_time_decorator(self):
         """Test log_time decorator"""
-        logger = logging.getLogger("test")
-        
-        @log_time(logger)
+        @log_time("test")
         def test_function():
             return "result"
         
@@ -100,9 +98,7 @@ class TestLogging:
     
     def test_log_time_with_args(self):
         """Test log_time decorator with function arguments"""
-        logger = logging.getLogger("test")
-        
-        @log_time(logger)
+        @log_time("test")
         def add(a, b):
             return a + b
         

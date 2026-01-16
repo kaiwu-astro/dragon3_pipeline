@@ -13,8 +13,6 @@ import seaborn as sns
 from dragon3_pipelines.utils import log_time
 from dragon3_pipelines.visualization.base import BaseHDF5Visualizer, add_grid
 
-logger = logging.getLogger(__name__)
-
 
 class BinaryStarVisualizer(BaseHDF5Visualizer):
     """Visualizer for binary star data"""
@@ -47,6 +45,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             extra_ax_handler: Optional callback to customize axes after main plot
             custom_ax_decorator: Optional callback for specific ax operations
         """
+        logger = logging.getLogger(__name__)
         if xlim_key is None:
             xlim_key = x_col
         if ylim_key is None:
@@ -150,14 +149,14 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
         compact_object_mask = hdf5_file_processor.get_compact_object_mask(df)
         return df[compact_object_mask]
     
-    @log_time(logger)
+    @log_time(__name__)
     def get_binary_cookie_dict(self, st1: str, st2: str) -> dict:
         """Get marker styling dictionary for binary stars"""
         return self.get_binary_cookie_dict_num(
             self.config.stellar_type_to_kw[st1], 
             self.config.stellar_type_to_kw[st2])
 
-    @log_time(logger)
+    @log_time(__name__)
     def get_binary_cookie_dict_num(self, kw1: int, kw2: int) -> dict:
         """Get marker styling dictionary for binary stars by KW numbers"""
         cookie_tastes = self.config.palette_st
@@ -171,7 +170,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
                     fillstyle=fs, ms=ms, alpha=0.6,
                     )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_mass_ratio_m1_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -188,7 +187,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mass_ratio_vs_primary_mass_loglog',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_mass_ratio_m1_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -217,7 +216,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             horizontalalignment='right'
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_semi_m1_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -235,7 +234,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=self._decorator_semi_m1
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_semi_m1_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -265,7 +264,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             ax.text(xmax, 1.0, f'{hard_num}\n{hard_frac:.1%} hard', color='darkred', ha='right', va='bottom')
             ax.text(xmax, 0.9, f'{soft_frac:.1%} soft\n{soft_num}', color='darkred', ha='right', va='top')
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_ebind_semi_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -282,7 +281,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=self._decorator_ebin_semi
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_ebind_semi_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -299,7 +298,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             custom_ax_decorator=self._decorator_ebin_semi
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_ecc_semi_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -315,7 +314,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='ecc_vs_a', 
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_ecc_semi_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -331,7 +330,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='ecc_vs_a_compact_objects_only',
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_ecc_semi_plot_jpg_compact_object_only_loglog(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -347,7 +346,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='ecc_vs_a_loglog_compact_objects_only',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_taugw_semi_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -363,7 +362,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='taugw_vs_a_compact_objects_only',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_mtot_distance_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -380,7 +379,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mtot_vs_distance_loglog',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_mtot_distance_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -397,7 +396,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mtot_vs_distance_loglog_compact_objects_only',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_semi_distance_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -413,7 +412,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='a_vs_distance',
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_semi_distance_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -429,7 +428,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='a_vs_distance_compact_objects_only',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_bin_vx_x_plot_density(
         self, 
         binary_df_at_t: pd.DataFrame, 
@@ -447,7 +446,7 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             ylim_key='velocity_kmps_lim',
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_bin_vx_x_plot_jpg_compact_object_only(
         self, 
         binary_df_at_t: pd.DataFrame, 

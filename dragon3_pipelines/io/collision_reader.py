@@ -8,12 +8,11 @@ import pandas as pd
 
 from dragon3_pipelines.io.base import ContinousFileProcessor
 
-logger = logging.getLogger(__name__)
-
 
 class _Coll_Coal_FileProcessor(ContinousFileProcessor):
     """Read and preprocess coll.13 and coal.24 files"""
     def read_file(self, simu_name: str, read_csv_func: Callable[[str], pd.DataFrame]) -> pd.DataFrame:
+        logger = logging.getLogger(__name__)
         self.concat_file(simu_name)
         logger.debug(f'Loading gathered {self.file_basename} of {simu_name} at {self.file_path}')
         df = read_csv_func(self.file_path)

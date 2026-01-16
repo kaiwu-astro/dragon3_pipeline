@@ -15,8 +15,6 @@ from tqdm.auto import tqdm
 from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
 
-logger = logging.getLogger(__name__)
-
 
 class ParticleTracker:
     """Track individual particles through time in simulation data"""
@@ -31,7 +29,7 @@ class ParticleTracker:
         self.config = config_manager
         self.hdf5_file_processor = HDF5FileProcessor(config_manager)
 
-    @log_time(logger)
+    @log_time(__name__)
     def get_particle_df_from_hdf5_file(self, df_dict: Dict[str, pd.DataFrame], 
                                    particle_name: int) -> pd.DataFrame:
         """
@@ -46,6 +44,7 @@ class ParticleTracker:
         Returns:
             particle_history_df: DataFrame containing all time points for this particle
         """
+        logger = logging.getLogger(__name__)
         single_df_all = df_dict['singles']
         binary_df_all = df_dict['binaries']
         
@@ -90,7 +89,7 @@ class ParticleTracker:
             logger.warning(f"Warning: Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}")
             return pd.DataFrame()
 
-    @log_time(logger)
+    @log_time(__name__)
     def get_particle_summary(self, particle_history_df: pd.DataFrame) -> Dict[str, Any]:
         """
         Get summary information about a particle's evolution history
@@ -127,6 +126,7 @@ class ParticleTracker:
         Returns:
             DataFrame with particle data from all snapshots in this HDF5 file
         """
+        logger = logging.getLogger(__name__)
         hdf5_file_path, particle_name, simu_name = args
         
         try:
@@ -137,7 +137,7 @@ class ParticleTracker:
             logger.error(f"Error processing {hdf5_file_path} for particle {particle_name}: {type(e).__name__}: {e}")
             return pd.DataFrame()
 
-    @log_time(logger)
+    @log_time(__name__)
     def get_particle_df_all(self, simu_name: str, particle_name: int, 
                                update: bool = True) -> pd.DataFrame:
         """
@@ -152,6 +152,7 @@ class ParticleTracker:
         Returns:
             DataFrame containing complete particle evolution history
         """
+        logger = logging.getLogger(__name__)
         cache_base = self.config.particle_df_cache_dir_of[simu_name]
         os.makedirs(cache_base, exist_ok=True)
         
@@ -252,7 +253,7 @@ class ParticleTracker:
         else:
             return old_df_all
 
-    @log_time(logger)
+    @log_time(__name__)
     def save_every_particle_df_of_sim(self, simu_name: str) -> None:
         """
         Get and save particle dataframes for all particles in the simulation
@@ -260,6 +261,7 @@ class ParticleTracker:
         Args: 
             simu_name: Name of the simulation
         """
+        logger = logging.getLogger(__name__)
         # 1. Get all HDF5 files
         hdf5_files = sorted(
             glob(self.config.pathof[simu_name] + '/**/*.h5part'), 

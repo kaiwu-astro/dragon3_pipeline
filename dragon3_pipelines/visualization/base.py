@@ -13,8 +13,6 @@ import seaborn as sns
 
 from dragon3_pipelines.utils import BlackbodyColorConverter
 
-logger = logging.getLogger(__name__)
-
 
 def set_mpl_fonts() -> None:
     """Configure matplotlib fonts and styling for plots."""
@@ -193,6 +191,7 @@ class BaseHDF5Visualizer(BaseVisualizer):
             custom_ax_joint_decorator: Optional callback for specific ax_joint operations
                                        after decorate_jointfig and before saving
         """
+        logger = logging.getLogger(__name__)
         if xlim_key is None:
             xlim_key = x_col
         if ylim_key is None:

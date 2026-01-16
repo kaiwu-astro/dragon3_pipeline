@@ -9,26 +9,26 @@ import logging
 F = TypeVar('F', bound=Callable[..., Any])
 
 
-def log_time(logger: logging.Logger) -> Callable[[F], F]:
+def log_time(logger_name: str) -> Callable[[F], F]:
     """
     Decorator to log execution time of a function.
     
     Args:
-        logger: Logger instance to use for logging
+        logger_name: Name of the logger to use (e.g., __name__ or "test")
         
     Returns:
         Decorated function that logs start time, end time, and duration
         
     Example:
-        >>> import logging
-        >>> logger = logging.getLogger(__name__)
-        >>> @log_time(logger)
+        >>> @log_time(__name__)
         ... def my_function():
         ...     pass
     """
     def decorator(func: F) -> F:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Dynamically get logger at runtime to avoid import-time capture
+            logger = logging.getLogger(logger_name)
             start_time = time.time()
             logger.debug(
                 f"Function {func.__name__} started at "

@@ -13,15 +13,13 @@ import astropy.units as u
 
 from dragon3_pipelines.utils import log_time
 
-logger = logging.getLogger(__name__)
-
 
 class HDF5FileProcessor:
     """Read and preprocess HDF5 data for plotting"""
     def __init__(self, config_manager):
         self.config = config_manager
     
-    @log_time(logger)
+    @log_time(__name__)
     def read_file(self, hdf5_path: str, simu_name: Optional[str] = None, N0: Optional[int] = None) -> Dict[str, pd.DataFrame]:
         """
         Load and preprocess HDF5 data. Extract multiple DataFrames from a single HDF5 file containing snapshots at multiple times.
@@ -41,6 +39,7 @@ class HDF5FileProcessor:
         from dragon3_pipelines.io.text_parsers import get_valueStr_of_namelist_key, get_scale_dict_from_hdf5_df, dataframes_from_hdf5_file
         from dragon3_pipelines.io.text_parsers import tau_gw
         
+        logger = logging.getLogger(__name__)
         logger.debug(f"\nProcessing {hdf5_path=}...")
         
         # 获取数据框
@@ -158,7 +157,7 @@ class HDF5FileProcessor:
         """
         return float(hdf5_path.split('snap.40_')[-1].split('.h5part')[0])
     
-    @log_time(logger)
+    @log_time(__name__)
     def get_snapshot_at_t(self, df_dict: Dict[str, pd.DataFrame], ttot: float) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame], bool]:
         """
         Get snapshot data at a specific time point
@@ -227,6 +226,7 @@ class HDF5FileProcessor:
 
     def mark_funny_star_binary(self, binary_df: pd.DataFrame) -> None:
         """Mark 'interesting' binary star targets (writes tag_* columns and aggregates to is_funny)"""
+        logger = logging.getLogger(__name__)
         df = binary_df
         low, high = self.config.IMBH_mass_range_msun
         gap_low, gap_high = self.config.PISNe_mass_gap
@@ -329,7 +329,7 @@ class HDF5FileProcessor:
         E_bind = E_kin + E_pot
         return E_bind
 
-    @log_time(logger)
+    @log_time(__name__)
     def get_triples_from_hdf5(self, df_dict: Dict[str, pd.DataFrame], ttot: float) -> pd.DataFrame:
         """
         Identify hierarchical triple systems
@@ -341,6 +341,7 @@ class HDF5FileProcessor:
         Returns:
             triples_df: DataFrame containing triple system information
         """
+        logger = logging.getLogger(__name__)
         pc_to_AU = constants.pc.to(u.AU).value
         
         single_df_at_t, binary_df_at_t, is_valid = self.get_snapshot_at_t(df_dict, ttot)

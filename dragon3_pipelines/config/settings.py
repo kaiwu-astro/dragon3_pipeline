@@ -12,7 +12,7 @@ import logging
 
 from dragon3_pipelines.utils import can_convert_to_float
 
-logger = logging.getLogger(__name__)
+
 
 
 def load_config(config_path: Optional[str] = None) -> 'ConfigManager':
@@ -222,6 +222,7 @@ class ConfigManager:
         """
         Resolve 'last' values in skip_until by finding maximum time from existing plots.
         """
+        logger = logging.getLogger(__name__)
         for simu_name in self.pathof.keys():
             if self.skip_until_of.get(simu_name) == 'last':
                 # Find existing plots: plot_dir/figname_prefix*ttot_*.pdf

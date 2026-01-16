@@ -12,8 +12,6 @@ import seaborn as sns
 from dragon3_pipelines.io import load_GWTC_catalog
 from dragon3_pipelines.visualization.base import BaseContinousFileVisualizer, add_grid
 
-logger = logging.getLogger(__name__)
-
 
 class CollCoalVisualizer(BaseContinousFileVisualizer):
     """Visualizer for collision and coalescence events"""

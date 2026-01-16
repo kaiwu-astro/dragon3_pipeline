@@ -8,8 +8,6 @@ import pandas as pd
 
 from dragon3_pipelines.io.base import ContinousFileProcessor
 
-logger = logging.getLogger(__name__)
-
 
 class LagrFileProcessor(ContinousFileProcessor):
     """Read and preprocess lagr.7 files"""
@@ -17,6 +15,7 @@ class LagrFileProcessor(ContinousFileProcessor):
         super().__init__(config_manager, file_basename='lagr.7')
     
     def read_file(self, simu_name: str) -> pd.DataFrame:
+        logger = logging.getLogger(__name__)
         from dragon3_pipelines.io.text_parsers import read_lagr_7, l7df_to_physical_units
         
         self.concat_file(simu_name)
@@ -31,6 +30,7 @@ class LagrFileProcessor(ContinousFileProcessor):
         1) Drop rows with non-numeric data (should all be int/float)
         2) Handle duplicate 'Time[NB]': keep last occurrence (avoid incomplete rows from interruptions)
         """
+        logger = logging.getLogger(__name__)
         numeric_df = l7df.apply(pd.to_numeric, errors='coerce')
         non_numeric_mask = (numeric_df.isna() & l7df.notna()).any(axis=1)
         if non_numeric_mask.any():

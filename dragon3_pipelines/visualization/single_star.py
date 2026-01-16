@@ -13,13 +13,11 @@ import seaborn as sns
 from dragon3_pipelines.utils import log_time
 from dragon3_pipelines.visualization.base import BaseHDF5Visualizer, add_grid
 
-logger = logging.getLogger(__name__)
-
 
 class SingleStarVisualizer(BaseHDF5Visualizer):
     """Visualizer for single star data"""
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_mass_distance_plot_density(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -35,7 +33,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             filename_var_part='mass_vs_distance_loglog',
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_vx_x_plot_density(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -53,7 +51,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             ylim_key='velocity_kmps_lim', 
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_CMD_plot_density(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -72,7 +70,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             custom_ax_joint_decorator=_custom_decorator
         )
     
-    @log_time(logger)
+    @log_time(__name__)
     def create_position_plot_jpg(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -84,6 +82,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         uniform_color_and_size: bool = False
     ) -> None:
         """Create position scatter plot"""
+        logger = logging.getLogger(__name__)
         ttot = single_df_at_t['TTOT'].iloc[0]
         tmyr = single_df_at_t['Time[Myr]'].iloc[0]
         t_over_tcr0 = single_df_at_t['TTOT/TCR0'].iloc[0]
@@ -131,7 +130,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             except NameError:
                 plt.close(ax.figure)
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_position_plot_wide_pc_jpg(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -150,7 +149,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             uniform_color_and_size=True
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_position_plot_hightlight_compact_objects_jpg(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -161,6 +160,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         custom_ax_decorator: Optional[Callable[[plt.Axes], None]] = None
     ) -> None:
         """Create position plot highlighting compact objects"""
+        logger = logging.getLogger(__name__)
         ttot = single_df_at_t['TTOT'].iloc[0]
         tmyr = single_df_at_t['Time[Myr]'].iloc[0]
         t_over_tcr0 = single_df_at_t['TTOT/TCR0'].iloc[0]
@@ -247,7 +247,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         except NameError:
             plt.close(fig)
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_position_plot_hightlight_compact_objects_wide_pc_jpg(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -264,7 +264,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             custom_ax_decorator=_set_wide_pos_lim_pc
         )
 
-    @log_time(logger)
+    @log_time(__name__)
     def create_color_CMD_jpg(
         self, 
         single_df_at_t: pd.DataFrame, 
@@ -273,6 +273,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
         extra_ax_handler: Optional[Callable[[plt.Axes], None]] = None
     ) -> None:
         """Create color CMD plot"""
+        logger = logging.getLogger(__name__)
         ttot = single_df_at_t['TTOT'].iloc[0]
         tmyr = single_df_at_t['Time[Myr]'].iloc[0]
         t_over_tcr0 = single_df_at_t['TTOT/TCR0'].iloc[0]
