@@ -101,9 +101,9 @@ class TestParticleTracker:
         assert result.empty
     
     def test_get_particle_df_from_hdf5_file_both_binary_members(self, particle_tracker):
-        """Test error handling when particle appears as both binary members"""
-        # Create invalid data where particle is both Name1 and Name2
-        invalid_df_dict = {
+        """Test handling when particle appears as both binary members"""
+        # Create data where particle is both Name1 and Name2
+        test_df_dict = {
             'singles': pd.DataFrame({
                 'Name': [1000],
                 'TTOT': [0.0],
@@ -116,8 +116,12 @@ class TestParticleTracker:
             'scalars': pd.DataFrame({'TTOT': [0.0, 1.0]}),
         }
         
-        with pytest.raises(AssertionError, match="appears as both Bin Name1 and Bin Name2"):
-            particle_tracker.get_particle_df_from_hdf5_file(invalid_df_dict, 1000)
+        # Should not raise error, but should log warning and deduplicate
+        result = particle_tracker.get_particle_df_from_hdf5_file(test_df_dict, 1000)
+        
+        # Should have deduplicated the TTOT=1.0 entry
+        assert not result.empty
+        assert result['TTOT'].is_unique
     
     def test_get_particle_summary_empty(self, particle_tracker):
         """Test summary with empty DataFrame"""
