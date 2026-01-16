@@ -1,0 +1,368 @@
+"""Tests for dragon3_pipelines.io module"""
+
+import pytest
+import numpy as np
+import pandas as pd
+import tempfile
+import h5py
+from pathlib import Path
+from unittest.mock import Mock, MagicMock, patch
+
+from dragon3_pipelines.io import (
+    get_scale_dict,
+    get_scale_dict_from_hdf5_df,
+    read_bwdat,
+    read_bdat,
+    read_coll_13,
+    read_coal_24,
+    make_l7header,
+    read_lagr_7,
+    l7df_to_physical_units,
+    transform_l7df_to_sns_friendly,
+    get_valueStr_of_namelist_key,
+    decode_bytes_columns_inplace,
+    tau_gw,
+    dataframes_from_hdf5_file,
+    merge_multiple_hdf5_dataframes,
+    HDF5FileProcessor,
+    LagrFileProcessor,
+    Coll13FileProcessor,
+    Coal24FileProcessor,
+)
+
+
+class TestScaleDictFunctions:
+    """Test scale dictionary extraction functions"""
+    
+    def test_get_scale_dict_from_hdf5_df(self):
+        """Test extracting scale dict from HDF5 scalar dataframe"""
+        scalar_df = pd.DataFrame({
+            'RBAR': [1.5],
+            'VSTAR': [2.0],
+            'ZMBAR': [0.5],
+            'TSCALE': [10.0]
+        })
+        
+        scale_dict = get_scale_dict_from_hdf5_df(scalar_df)
+        
+        assert scale_dict['r'] == 1.5
+        assert scale_dict['v'] == 2.0
+        assert scale_dict['m'] == 0.5
+        assert scale_dict['t'] == 10.0
+
+
+class TestTextParsers:
+    """Test text file parsing functions"""
+    
+    def test_read_bwdat(self, temp_dir):
+        """Test reading bwdat file"""
+        bwdat_file = temp_dir / "test.bwdat"
+        bwdat_file.write_text("# Header\nA B C\n1 2 3\n4 5 6\n")
+        
+        df = read_bwdat(str(bwdat_file))
+        assert len(df) == 2
+        assert list(df.columns) == ['A', 'B', 'C']
+        assert df['A'].tolist() == [1, 4]
+    
+    def test_read_bdat(self, temp_dir):
+        """Test reading bdat file"""
+        bdat_file = temp_dir / "test.bdat"
+        bdat_file.write_text("A B C\n1 2 3\n4 5 6\n")
+        
+        df = read_bdat(str(bdat_file))
+        assert len(df) == 2
+        assert list(df.columns) == ['A', 'B', 'C']
+    
+    def test_make_l7header(self):
+        """Test lagr.7 header generation"""
+        header = make_l7header()
+        assert isinstance(header, list)
+        assert header[0] == 'Time[NB]'
+        assert len(header) == 284
+    
+    def test_get_valueStr_of_namelist_key(self, temp_dir):
+        """Test extracting value from namelist file"""
+        namelist_file = temp_dir / "test.inp"
+        namelist_file.write_text("""
+        &INPUT
+        N = 1000000
+        ALPHA = 0.5
+        BETA = 2.3e-4
+        &END
+        """)
+        
+        n_value = get_valueStr_of_namelist_key(str(namelist_file), 'N')
+        assert n_value == '1000000'
+        
+        alpha_value = get_valueStr_of_namelist_key(str(namelist_file), 'ALPHA')
+        assert alpha_value == '0.5'
+        
+        beta_value = get_valueStr_of_namelist_key(str(namelist_file), 'BETA')
+        assert beta_value == '2.3e-4'
+        
+        # Test key not found
+        with pytest.raises(KeyError):
+            get_valueStr_of_namelist_key(str(namelist_file), 'NOTEXIST')
+    
+    def test_decode_bytes_columns_inplace(self):
+        """Test decoding bytes columns in DataFrame"""
+        df = pd.DataFrame({
+            'name': [b'star1  ', b'star2  '],
+            'value': [1.0, 2.0]
+        })
+        
+        decode_bytes_columns_inplace(df)
+        
+        assert df['name'].tolist() == ['star1', 'star2']
+        assert df['value'].tolist() == [1.0, 2.0]
+
+
+class TestLagrFunctions:
+    """Test lagr.7 file processing functions"""
+    
+    def test_l7df_to_physical_units(self):
+        """Test converting lagr.7 dataframe to physical units"""
+        df = pd.DataFrame({
+            'Time[NB]': [0.0, 1.0, 2.0],
+            'rlagr1.00E-03': [0.1, 0.2, 0.3],
+            'vx1.00E-03': [1.0, 2.0, 3.0],
+            'sigma21.00E-03': [0.5, 1.0, 1.5],
+            'nshell1.00E-03': [100, 200, 300],
+        })
+        
+        scale_dict = {'r': 2.0, 'v': 3.0, 't': 10.0, 'm': 0.5}
+        
+        converted_df = l7df_to_physical_units(df, scale_dict)
+        
+        assert 'Time[Myr]' in converted_df.columns
+        assert 'Time[NB]' not in converted_df.columns
+        assert converted_df['Time[Myr]'].tolist() == [0.0, 10.0, 20.0]
+        assert converted_df['rlagr1.00E-03'].tolist() == [0.2, 0.4, 0.6]
+        assert converted_df['vx1.00E-03'].tolist() == [3.0, 6.0, 9.0]
+        assert converted_df['sigma21.00E-03'].tolist() == [4.5, 9.0, 13.5]
+        assert converted_df['nshell1.00E-03'].tolist() == [100, 200, 300]
+    
+    def test_transform_l7df_to_sns_friendly(self):
+        """Test transforming lagr.7 dataframe to seaborn-friendly format"""
+        df = pd.DataFrame({
+            'Time[Myr]': [0.0, 1.0],
+            'rlagr1.00E-03': [0.1, 0.2],
+            'rlagr3.00E-03': [0.15, 0.25],
+            'vx1.00E-03': [1.0, 2.0],
+        })
+        
+        sns_df = transform_l7df_to_sns_friendly(df)
+        
+        assert 'Time[Myr]' in sns_df.columns
+        assert 'Percentage' in sns_df.columns
+        assert 'Metric' in sns_df.columns
+        assert 'Value' in sns_df.columns
+        assert '%' in sns_df.columns
+        
+        assert len(sns_df) == 6
+        
+        assert set(sns_df['Metric'].unique()) == {'rlagr', 'vx'}
+        assert '0.1%' in sns_df['%'].values
+        assert '0.3%' in sns_df['%'].values
+
+
+class TestTauGW:
+    """Test gravitational wave merger timescale function"""
+    
+    def test_tau_gw_float_inputs(self):
+        """Test tau_gw with float inputs"""
+        import astropy.constants as constants
+        
+        a = 1e9
+        e = 0.5
+        mu = 1e30
+        M = 2e30
+        
+        tau = tau_gw(a, e, mu, M)
+        
+        assert tau > 0
+        assert isinstance(tau, float)
+    
+    def test_tau_gw_astropy_units(self):
+        """Test tau_gw with astropy Quantity inputs"""
+        import astropy.units as u
+        
+        a = 1.0 * u.au
+        e = 0.1
+        mu = 30.0 * u.solMass
+        M = 60.0 * u.solMass
+        
+        tau = tau_gw(a, e, mu, M)
+        
+        assert hasattr(tau, 'unit')
+        assert tau.value > 0
+
+
+class TestHDF5Functions:
+    """Test HDF5 file processing functions"""
+    
+    def test_merge_multiple_hdf5_dataframes(self):
+        """Test merging multiple HDF5 dataframes"""
+        df1_dict = {
+            'scalars': pd.DataFrame({'TTOT': [0.0, 1.0], 'N': [1000, 999]}),
+            'singles': pd.DataFrame({'TTOT': [0.0], 'M': [1.0]}),
+            'binaries': None,
+            'mergers': None,
+        }
+        
+        df2_dict = {
+            'scalars': pd.DataFrame({'TTOT': [2.0, 3.0], 'N': [998, 997]}),
+            'singles': pd.DataFrame({'TTOT': [2.0], 'M': [1.1]}),
+            'binaries': pd.DataFrame({'TTOT': [2.0], 'Bin M1*': [2.0]}),
+            'mergers': None,
+        }
+        
+        merged = merge_multiple_hdf5_dataframes([df1_dict, df2_dict])
+        
+        assert merged['scalars'] is not None
+        assert len(merged['scalars']) == 4
+        assert merged['singles'] is not None
+        assert len(merged['singles']) == 2
+        assert merged['binaries'] is not None
+        assert len(merged['binaries']) == 1
+        assert merged['mergers'] is None
+
+
+class TestHDF5FileProcessor:
+    """Test HDF5FileProcessor class"""
+    
+    def test_get_hdf5_name_time(self):
+        """Test extracting time from HDF5 filename"""
+        config_mock = Mock()
+        processor = HDF5FileProcessor(config_mock)
+        
+        path = "/path/to/snap.40_1.234.h5part"
+        time = processor.get_hdf5_name_time(path)
+        
+        assert time == 1.234
+    
+    def test_get_compact_object_mask_singles(self):
+        """Test getting compact object mask for singles"""
+        config_mock = Mock()
+        config_mock.compact_object_KW = [13, 14]
+        processor = HDF5FileProcessor(config_mock)
+        
+        df = pd.DataFrame({
+            'KW': [0, 1, 13, 14, 5]
+        })
+        
+        mask = processor.get_compact_object_mask(df)
+        
+        assert mask.tolist() == [False, False, True, True, False]
+    
+    def test_get_compact_object_mask_binaries(self):
+        """Test getting compact object mask for binaries"""
+        config_mock = Mock()
+        config_mock.compact_object_KW = [13, 14]
+        processor = HDF5FileProcessor(config_mock)
+        
+        df = pd.DataFrame({
+            'Bin KW1': [0, 13, 1],
+            'Bin KW2': [1, 2, 14]
+        })
+        
+        mask = processor.get_compact_object_mask(df)
+        
+        assert mask.tolist() == [False, True, True]
+    
+    def test_compute_binding_energy(self):
+        """Test computing binding energy for triple system"""
+        config_mock = Mock()
+        processor = HDF5FileProcessor(config_mock)
+        
+        E_bind = processor._compute_binding_energy(
+            m_bin=10.0,
+            m3=5.0,
+            r=0.1,
+            v_rel_x=10.0,
+            v_rel_y=0.0,
+            v_rel_z=0.0
+        )
+        
+        assert isinstance(E_bind, float)
+
+
+class TestLagrFileProcessor:
+    """Test LagrFileProcessor class"""
+    
+    def test_initialization(self):
+        """Test LagrFileProcessor initialization"""
+        config_mock = Mock()
+        processor = LagrFileProcessor(config_mock)
+        
+        assert processor.file_basename == 'lagr.7'
+        assert processor.config == config_mock
+
+
+class TestCollisionProcessors:
+    """Test Coll13FileProcessor and Coal24FileProcessor"""
+    
+    def test_coll13_initialization(self):
+        """Test Coll13FileProcessor initialization"""
+        config_mock = Mock()
+        processor = Coll13FileProcessor(config_mock)
+        
+        assert processor.file_basename == 'coll.13'
+    
+    def test_coal24_initialization(self):
+        """Test Coal24FileProcessor initialization"""
+        config_mock = Mock()
+        processor = Coal24FileProcessor(config_mock)
+        
+        assert processor.file_basename == 'coal.24'
+    
+    def test_merge_coll_coal(self):
+        """Test merging collision and coalescence dataframes"""
+        config_mock = Mock()
+        processor = Coll13FileProcessor(config_mock)
+        
+        df1 = pd.DataFrame({'A': [1, 2], 'B': [3, 4]})
+        df2 = pd.DataFrame({'A': [5, 6], 'C': [7, 8]})
+        
+        merged = processor.merge_coll_coal(df1, df2)
+        
+        assert len(merged) == 4
+        assert set(merged.columns) == {'A', 'B', 'C'}
+        assert merged['A'].tolist() == [1, 2, 5, 6]
+
+
+class TestIntegration:
+    """Integration tests for I/O module"""
+    
+    def test_import_all_exports(self):
+        """Test that all exports can be imported"""
+        from dragon3_pipelines.io import (
+            HDF5FileProcessor,
+            LagrFileProcessor,
+            Coll13FileProcessor,
+            Coal24FileProcessor,
+            get_scale_dict,
+            get_scale_dict_from_hdf5_df,
+            read_bwdat,
+            read_bdat,
+            read_coll_13,
+            read_coal_24,
+            make_l7header,
+            read_lagr_7,
+            l7df_to_physical_units,
+            transform_l7df_to_sns_friendly,
+            get_valueStr_of_namelist_key,
+            decode_bytes_columns_inplace,
+            tau_gw,
+            dataframes_from_hdf5_file,
+            merge_multiple_hdf5_dataframes,
+        )
+        
+        assert HDF5FileProcessor is not None
+        assert LagrFileProcessor is not None
+        assert Coll13FileProcessor is not None
+        assert Coal24FileProcessor is not None
+
+
+if __name__ == '__main__':
+    pytest.main([__file__, '-v'])
