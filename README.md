@@ -112,7 +112,7 @@ from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.config import ConfigManager
 
 config = ConfigManager()
-processor = HDF5FileProcessor(config, "my_sim")
+processor = HDF5FileProcessor(config)
 df_singles, df_binaries = processor.get_hdf5_dataframes()
 ```
 
@@ -120,8 +120,9 @@ df_singles, df_binaries = processor.get_hdf5_dataframes()
 
 ```python
 from dragon3_pipelines.analysis import ParticleTracker
+from dragon3_pipelines.config import ConfigManager
 
-tracker = ParticleTracker(config, "my_sim")
+tracker = ParticleTracker(config)
 particle_history = tracker.get_particle_new_df_all(particle_id=12345)
 ```
 
