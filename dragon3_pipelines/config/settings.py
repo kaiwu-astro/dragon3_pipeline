@@ -224,18 +224,17 @@ class ConfigManager:
         """
         for simu_name in self.pathof.keys():
             if self.skip_until_of.get(simu_name) == 'last':
-                # Find existing plots: plot_dir/figname_prefix*ttot_*.pdf
                 pattern = (
-                    f"{self.plot_dir}/{self.figname_prefix[simu_name]}*ttot_*.pdf"
+                    f"{self.plot_dir}/jpg/{self.figname_prefix[simu_name]}*ttot_*.jpg"
                 )
-                all_pdf_plots = glob(pattern)
+                all_jpg_plots = glob(pattern)
                 
-                if all_pdf_plots:
+                if all_jpg_plots:
                     # Extract time from filename
                     def get_time(path: str) -> float:
                         return float(path.split('ttot_')[1].split('_')[0])
                     
-                    all_times = np.array([get_time(x) for x in all_pdf_plots])
+                    all_times = np.array([get_time(x) for x in all_jpg_plots])
                     self.skip_until_of[simu_name] = float(all_times.max())
                     logger.info(
                         f"[{simu_name}] Set skip-until={self.skip_until_of[simu_name]}"

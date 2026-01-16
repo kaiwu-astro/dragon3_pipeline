@@ -175,6 +175,7 @@ class BaseHDF5Visualizer(BaseVisualizer):
         extra_data_handler: Optional[Callable[[pd.DataFrame], pd.DataFrame]] = None,
         extra_ax_handler: Optional[Callable[[plt.Axes], None]] = None,
         custom_ax_joint_decorator: Optional[Callable[[plt.Axes, pd.DataFrame], None]] = None,
+        save_pdf = False
     ) -> None:
         """
         Helper function to create density plots based on sns.jointplot.
@@ -210,8 +211,8 @@ class BaseHDF5Visualizer(BaseVisualizer):
         save_pdf_path = f"{self.config.plot_dir}/{base_filename}.pdf"
         save_jpg_path = f"{self.config.plot_dir}/jpg/{base_filename}.jpg"
 
-        if self.config.skip_existing_plot and os.path.exists(save_pdf_path):
-            logger.debug(f"Skip existing plot: {save_pdf_path}")
+        if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
+            logger.debug(f"Skip existing plot: {save_jpg_path}")
             return
 
         g = sns.jointplot(
@@ -241,8 +242,9 @@ class BaseHDF5Visualizer(BaseVisualizer):
             custom_ax_joint_decorator(g.ax_joint, processed_df)
 
         add_grid(g.ax_joint) 
-        g.savefig(save_pdf_path)
         g.savefig(save_jpg_path)
+        if save_pdf:
+            g.savefig(save_pdf_path)
         try:
             __IPYTHON__
             if self.config.close_figure_in_ipython:
