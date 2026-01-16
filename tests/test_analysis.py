@@ -101,7 +101,7 @@ class TestParticleTracker:
         assert result.empty
     
     def test_get_particle_df_from_hdf5_file_both_binary_members(self, particle_tracker):
-        """Test handling when particle appears as both binary members"""
+        """Test graceful handling and deduplication when particle appears as both binary members"""
         # Create data where particle is both Name1 and Name2
         test_df_dict = {
             'singles': pd.DataFrame({
