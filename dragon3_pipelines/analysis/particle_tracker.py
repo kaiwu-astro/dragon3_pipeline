@@ -3,6 +3,7 @@
 import logging
 import multiprocessing
 import os
+import time
 from glob import glob
 from typing import Any, Dict, Optional, Tuple
 
@@ -191,10 +192,18 @@ class ParticleTracker:
             return old_df_all
         
         # 2. Get and filter file list
+        # 获取所有快照文件
         hdf5_snap_files = sorted(
             glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
             key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
         )
+        WAIT_SNAPSHOT_AGE_HOUR = 24
+        cutoff = time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600
+        hdf5_snap_files = [
+            fn for fn in hdf5_snap_files
+            if os.path.getmtime(fn) <= cutoff
+        ]
+
         files_to_process = [f for f in hdf5_snap_files if self.hdf5_file_processor.get_hdf5_name_time(f) > particle_skip_until]
         
         if not files_to_process:

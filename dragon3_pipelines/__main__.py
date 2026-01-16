@@ -135,10 +135,12 @@ class SimulationPlotter:
                 glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
                 key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
             )
-            # 如果最后一个快照的修改时间在24小时之内，则从列表中删除，避免读取一个正在跑的模拟
             WAIT_SNAPSHOT_AGE_HOUR = 24
-            if hdf5_snap_files and os.path.getmtime(hdf5_snap_files[-1]) > time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600:
-                logger.info(f"Last snapshot of {simu_name}: {hdf5_snap_files.pop()} is created within {WAIT_SNAPSHOT_AGE_HOUR}h, skipping it.")
+            cutoff = time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600
+            hdf5_snap_files = [
+                fn for fn in hdf5_snap_files
+                if os.path.getmtime(fn) <= cutoff
+            ]
             
             # 创建带固定参数的部分函数
             process_file_partial = functools.partial(
