@@ -94,6 +94,15 @@ dragon3_pipelines/
 └── scripts/         # Shell scripts for movie generation
 ```
 
+## Terminology
+
+**Important:** This codebase uses specific terminology to distinguish between files and data:
+
+- **HDF5 file** (`.h5part`): A file containing **multiple snapshots** (typically 8 per file)
+- **Snapshot**: Simulation data at **one specific moment in time** (one `TTOT` value)
+
+Each HDF5 file contains multiple snapshots at different time points. See [docs/terminology.md](docs/terminology.md) for detailed explanations and code examples.
+
 ## Features
 
 - **Modular Design**: Clean separation of I/O, analysis, and visualization

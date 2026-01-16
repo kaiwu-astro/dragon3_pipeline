@@ -44,16 +44,21 @@ class SimulationPlotter:
         self.lagr_visualizer = LagrVisualizer(config_manager)
         self.particle_tracker = ParticleTracker(config_manager)
 
-    def plot_hdf5_snapshots(self, hdf5_snap_path: str, simu_name: str) -> None:
-        """处理单个快照文件"""
-        # 获取快照时间
-        t_nbody_in_filename = self.hdf5_file_processor.get_hdf5_name_time(hdf5_snap_path)
+    def plot_hdf5_file(self, hdf5_file_path: str, simu_name: str) -> None:
+        """处理单个HDF5文件（包含多个snapshot）
+        
+        Args:
+            hdf5_file_path: Path to HDF5 file (contains multiple snapshots)
+            simu_name: Name of the simulation
+        """
+        # 获取HDF5文件的代表时间
+        t_nbody_in_filename = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
         if t_nbody_in_filename < self.config.skip_until_of[simu_name]:
             logger.debug("skipped")
             return
         
         # 加载数据
-        df_dict = self.hdf5_file_processor.read_file(hdf5_snap_path, simu_name)
+        df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
         
         # 处理每个时间点
         for ttot in df_dict['scalars']['TTOT'].unique():
@@ -66,7 +71,7 @@ class SimulationPlotter:
             # 获取该时间点的数据
             single_df_at_t, binary_df_at_t, is_valid = self.hdf5_file_processor.get_snapshot_at_t(df_dict, ttot)
             if not is_valid:
-                logger.info(f"Warning: {simu_name} {hdf5_snap_path} {ttot=} data validation failed, skipping")
+                logger.info(f"Warning: {simu_name} {hdf5_file_path} {ttot=} data validation failed, skipping")
                 continue
             
             # 位置散点图
@@ -130,13 +135,13 @@ class SimulationPlotter:
             # 先画lagr
             self.plot_lagr(simu_name)
 
-            # 获取所有快照文件
+            # 获取所有HDF5文件
             hdf5_files = sorted(
                 glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
-                key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
+                key=lambda fn: self.hdf5_file_processor.get_hdf5_file_time_from_filename(fn)
             )
-            WAIT_SNAPSHOT_AGE_HOUR = 24
-            cutoff = time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600
+            WAIT_HDF5_FILE_AGE_HOUR = 24
+            cutoff = time.time() - WAIT_HDF5_FILE_AGE_HOUR * 3600
             hdf5_files = [
                 fn for fn in hdf5_files
                 if os.path.getmtime(fn) <= cutoff
@@ -144,7 +149,7 @@ class SimulationPlotter:
             
             # 创建带固定参数的部分函数
             process_file_partial = functools.partial(
-                self.plot_hdf5_snapshots,
+                self.plot_hdf5_file,
                 simu_name=simu_name
             )
             
@@ -158,7 +163,7 @@ class SimulationPlotter:
                     tqdm(
                         pool.imap(process_file_partial, hdf5_files), 
                         total=len(hdf5_files), 
-                        desc=f'{simu_name} HDF5 Snap#'
+                        desc=f'{simu_name} HDF5 Files'
                     )
                 )
 

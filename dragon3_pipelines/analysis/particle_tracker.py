@@ -32,14 +32,15 @@ class ParticleTracker:
         self.hdf5_file_processor = HDF5FileProcessor(config_manager)
 
     @log_time(logger)
-    def get_particle_df_from_snap(self, df_dict: Dict[str, pd.DataFrame], 
+    def get_particle_df_from_hdf5_file(self, df_dict: Dict[str, pd.DataFrame], 
                                    particle_name: int) -> pd.DataFrame:
         """
-        Track a specific particle's evolution through time
+        Track a specific particle's evolution through snapshots in an HDF5 file
         
         Args:
             df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames 
                     (obtained from HDF5FileProcessor.read_file)
+                    Note: This dict contains data for MULTIPLE snapshots from ONE HDF5 file
             particle_name: Particle Name to track (e.g. 94820)
         
         Returns:
@@ -116,24 +117,24 @@ class ParticleTracker:
         
         return summary
 
-    def _process_single_snap_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
+    def _process_single_hdf5_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
         """
-        Worker function for parallel processing
+        Worker function for parallel processing of HDF5 files
         
         Args:
-            args: Tuple of (hdf5_path, particle_name, simu_name)
+            args: Tuple of (hdf5_file_path, particle_name, simu_name)
             
         Returns:
-            DataFrame with particle data from this snapshot
+            DataFrame with particle data from all snapshots in this HDF5 file
         """
-        hdf5_path, particle_name, simu_name = args
+        hdf5_file_path, particle_name, simu_name = args
         
         try:
-            df_dict = self.hdf5_file_processor.read_file(hdf5_path, simu_name)
-            particle_df = self.get_particle_df_from_snap(df_dict, particle_name)
+            df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+            particle_df = self.get_particle_df_from_hdf5_file(df_dict, particle_name)
             return particle_df
         except Exception as e:
-            logger.error(f"Error processing {hdf5_path} for particle {particle_name}: {type(e).__name__}: {e}")
+            logger.error(f"Error processing {hdf5_file_path} for particle {particle_name}: {type(e).__name__}: {e}")
             return pd.DataFrame()
 
     @log_time(logger)
@@ -146,7 +147,7 @@ class ParticleTracker:
         Args:
             simu_name: Name of the simulation
             particle_name: Particle Name to track
-            update: If True, process new snapshots; if False, only return cached data
+            update: If True, process new HDF5 files; if False, only return cached data
             
         Returns:
             DataFrame containing complete particle evolution history
@@ -173,25 +174,25 @@ class ParticleTracker:
             return old_df_all
         
         # 2. Get and filter file list
-        # 获取所有快照文件
+        # 获取所有HDF5文件
         hdf5_files = sorted(
             glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
-            key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
+            key=lambda fn: self.hdf5_file_processor.get_hdf5_file_time_from_filename(fn)
         )
-        WAIT_SNAPSHOT_AGE_HOUR = 24
-        cutoff = time.time() - WAIT_SNAPSHOT_AGE_HOUR * 3600
+        WAIT_HDF5_FILE_AGE_HOUR = 24
+        cutoff = time.time() - WAIT_HDF5_FILE_AGE_HOUR * 3600
         hdf5_files = [
             fn for fn in hdf5_files
             if os.path.getmtime(fn) <= cutoff
         ]
 
-        files_to_process = [f for f in hdf5_files if self.hdf5_file_processor.get_hdf5_name_time(f) > particle_skip_until]
+        files_to_process = [f for f in hdf5_files if self.hdf5_file_processor.get_hdf5_file_time_from_filename(f) > particle_skip_until]
         
         if not files_to_process:
-            logger.info(f"No new snapshots to process for particle {particle_name}")
+            logger.info(f"No new HDF5 files to process for particle {particle_name}")
             return old_df_all
 
-        logger.info(f"Found {len(files_to_process)} new snapshots to process for particle {particle_name}: {files_to_process[0]} ... {files_to_process[-1]}")
+        logger.info(f"Found {len(files_to_process)} new HDF5 files to process for particle {particle_name}: {files_to_process[0]} ... {files_to_process[-1]}")
 
         # 3. Prepare task arguments
         tasks = []
@@ -210,7 +211,7 @@ class ParticleTracker:
             maxtasksperchild=self.config.tasks_per_child
         ) as pool:
             # imap returns result in order of input
-            iterator = pool.imap(self._process_single_snap_for_particle, tasks)
+            iterator = pool.imap(self._process_single_hdf5_for_particle, tasks)
             tqdm_iterator = tqdm(iterator, total=len(tasks), desc=f"Tracking {particle_name} in {simu_name}")
 
             try:
@@ -222,7 +223,7 @@ class ParticleTracker:
                         consecutive_missing_count += 1
                     
                     if consecutive_missing_count >= MISSING_THRESHOLD:
-                        logger.info(f"Particle {particle_name} missing for {consecutive_missing_count} consecutive snapshots. Stopping search early and starting merging results")
+                        logger.info(f"Particle {particle_name} missing for {consecutive_missing_count} consecutive HDF5 files. Stopping search early and starting merging results")
                         pool.terminate()  # Force terminate process pool
                         break
             except Exception as e:
@@ -259,32 +260,32 @@ class ParticleTracker:
         Args: 
             simu_name: Name of the simulation
         """
-        # 1. Get all snapshot files
+        # 1. Get all HDF5 files
         hdf5_files = sorted(
             glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
-            key=lambda fn: self.hdf5_file_processor.get_hdf5_name_time(fn)
+            key=lambda fn: self.hdf5_file_processor.get_hdf5_file_time_from_filename(fn)
         )
         if not hdf5_files:
-            logger.error(f"No snapshot files found for simulation {simu_name}")
+            logger.error(f"No HDF5 files found for simulation {simu_name}")
             return
         
-        # 2. Find the t=0 snapshot (first snapshot)
-        t0_snapshot = hdf5_files[0]
+        # 2. Find the t=0 HDF5 file (first file)
+        t0_hdf5_file = hdf5_files[0]
         
-        # 3. Read t=0 snapshot and get all particle names
+        # 3. Read t=0 HDF5 file and get all particle names
         try:
-            df_dict = self.hdf5_file_processor.read_file(t0_snapshot, simu_name)
+            df_dict = self.hdf5_file_processor.read_file(t0_hdf5_file, simu_name)
             single_df = df_dict['singles']
             
             if single_df.empty or 'Name' not in single_df.columns:
-                logger.error(f"No particles found in initial snapshot {t0_snapshot}")
+                logger.error(f"No particles found in initial HDF5 file {t0_hdf5_file}")
                 return
             
             all_particle_names = single_df['Name'].unique()
             logger.info(f"Found {len(all_particle_names)} particles in simulation {simu_name}")
             
         except Exception as e:
-            logger.error(f"Failed to read initial snapshot {t0_snapshot}: {type(e).__name__}: {e}")
+            logger.error(f"Failed to read initial HDF5 file {t0_hdf5_file}: {type(e).__name__}: {e}")
             return
         
         # 4. Process each particle
