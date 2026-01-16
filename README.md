@@ -51,7 +51,7 @@ config = ConfigManager()
 config.processes_count = 20
 
 # Use visualizers
-visualizer = SingleStarVisualizer(hdf5_processor, config)
+visualizer = SingleStarVisualizer(config)
 ```
 
 ## Configuration
@@ -113,7 +113,8 @@ from dragon3_pipelines.config import ConfigManager
 
 config = ConfigManager()
 processor = HDF5FileProcessor(config)
-df_singles, df_binaries = processor.get_hdf5_dataframes()
+df_dict = processor.read_file(hdf5_path="/path/to/file.h5part", simu_name="my_sim")
+# df_dict contains 'scalars', 'singles', 'binaries', 'mergers' DataFrames
 ```
 
 ### Track Particles
@@ -122,17 +123,22 @@ df_singles, df_binaries = processor.get_hdf5_dataframes()
 from dragon3_pipelines.analysis import ParticleTracker
 from dragon3_pipelines.config import ConfigManager
 
+config = ConfigManager()
 tracker = ParticleTracker(config)
-particle_history = tracker.get_particle_new_df_all(particle_id=12345)
+particle_history = tracker.get_particle_new_df_all(simu_name="my_sim", particle_name=12345)
 ```
 
 ### Create Visualizations
 
 ```python
 from dragon3_pipelines.visualization import BinaryStarVisualizer
+from dragon3_pipelines.config import ConfigManager
 
-viz = BinaryStarVisualizer(hdf5_processor, config)
-viz.create_mass_ratio_vs_a_scatter(df_binaries, time=100.0)
+config = ConfigManager()
+viz = BinaryStarVisualizer(config)
+# Get binary data at a specific time first
+binary_df_at_t = df_dict['binaries'][df_dict['binaries']['TTOT'] == 100.0]
+viz.create_mass_ratio_m1_plot_density(binary_df_at_t, simu_name="my_sim")
 ```
 
 ## Command Line Options
