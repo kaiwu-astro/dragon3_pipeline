@@ -1,5 +1,6 @@
 """I/O module for reading and processing dragon3 simulation files"""
 
+from dragon3_pipelines.io.base import ContinousFileProcessor
 from dragon3_pipelines.io.hdf5_reader import HDF5FileProcessor
 from dragon3_pipelines.io.lagr_reader import LagrFileProcessor
 from dragon3_pipelines.io.collision_reader import Coll13FileProcessor, Coal24FileProcessor
@@ -24,6 +25,7 @@ from dragon3_pipelines.io.text_parsers import (
 )
 
 __all__ = [
+    'ContinousFileProcessor',
     'HDF5FileProcessor',
     'LagrFileProcessor',
     'Coll13FileProcessor',

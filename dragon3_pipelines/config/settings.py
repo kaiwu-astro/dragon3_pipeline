@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional, Tuple, Union
 from glob import glob
 import logging
 
-from dragon3_pipelines.utils.shell import can_convert_to_float
+from dragon3_pipelines.utils import can_convert_to_float
 
 logger = logging.getLogger(__name__)
 

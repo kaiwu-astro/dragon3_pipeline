@@ -6,7 +6,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
-from dragon3_pipelines.io.lagr_reader import ContinousFileProcessor
+from dragon3_pipelines.io.base import ContinousFileProcessor
 
 logger = logging.getLogger(__name__)
 
