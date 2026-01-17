@@ -129,37 +129,9 @@ def process_data(
     ...
 ```
 
-### Docstring 风格
-使用 **Google Style** docstring：
+## 术语
 
-```python
-def function_name(param1: str, param2: int) -> bool:
-    """
-    简短的一行功能描述。
-    
-    更详细的功能说明（可选）。可以分多段描述。
-    
-    Args:
-        param1: 参数1的描述
-        param2: 参数2的描述
-        
-    Returns:
-        返回值的描述
-        
-    Raises:
-        ValueError: 什么情况下抛出此异常
-        
-    Example:
-        >>> result = function_name("test", 42)
-        >>> print(result)
-        True
-    """
-    ...
-```
-
-## 关键术语
-
-详见 `docs/terminology.md`
+见 `docs/terminology.md`
 
 ### Snapshot vs HDF5 File
 
@@ -182,25 +154,6 @@ def function_name(param1: str, param2: int) -> bool:
 
 ### TTOT 时间单位
 `TTOT` 是模拟时间，单位为 N-body 时间单位（通常转换为 Myr）。`TTOT` 是所有快照数据的时间索引。
-
-### KW 恒星类型码
-恒星类型使用 KW 码表示（见 `default_config.yaml`）：
-
-```yaml
-stellar_types:
-  -1: "PMS"      # Pre-main sequence
-  0: "LMS"       # Low-mass star
-  1: "MS"        # Main sequence
-  2: "HG"        # Hertzsprung gap
-  3: "GB"        # Giant branch
-  7: "HeMS"      # Helium main sequence
-  10: "HeWD"     # Helium white dwarf
-  11: "COWD"     # Carbon-oxygen white dwarf
-  12: "ONeWD"    # Oxygen-neon white dwarf
-  13: "NS"       # Neutron star
-  14: "BH"       # Black hole
-  15: "MLR"      # Massless remnant
-```
 
 致密天体 KW 码：`[10, 11, 12, 13, 14]`
 
@@ -311,7 +264,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 ```
 
 **内存管理：**
-处理大量数据时，在循环中使用 `gc.collect()` 主动回收内存：
+每个single_df和binary_df的内存占用都接近1GB。使用循环处理大量数据时，应使用 `gc.collect()` 主动回收内存：
 ```python
 import gc
 
@@ -426,14 +379,6 @@ def expensive_function():
     pass
 ```
 
-**日志级别：**
-```python
-logger.debug("调试信息")      # 详细的调试信息
-logger.info("正常信息")       # 一般流程信息
-logger.warning("警告信息")    # 警告但不影响运行
-logger.error("错误信息")      # 错误信息
-```
-
 **典型日志模式：**
 ```python
 import logging
@@ -454,36 +399,6 @@ class DataProcessor:
             logger.debug(f"Processing file {i+1}/{len(file_list)}: {file_path}")
             self._process_single_file(file_path)
         logger.info("All files processed")
-```
-
-## 禁止事项
-
-### ❌ 禁止修改 default_config.yaml 中的硬编码路径
-
-**原因：**
-`default_config.yaml` 中的路径（`paths.simulations`、`paths.plot_dir` 等）是特定于开发环境的硬编码路径。这些路径在不同的机器或用户环境中无效。
-
-**正确做法：**
-- 用户应创建自己的 `config.yaml` 覆盖默认路径
-- 代码应支持通过命令行参数或环境变量指定配置文件
-- 文档应明确说明如何自定义配置
-
-**示例 - 用户自定义配置：**
-```yaml
-# my_config.yaml
-paths:
-  simulations:
-    my_sim: "/path/to/my/simulation"
-  plot_dir: "/path/to/my/plots"
-
-processing:
-  processes_count: 20
-```
-
-加载自定义配置：
-```python
-from dragon3_pipelines.config import load_config
-config = load_config("my_config.yaml")
 ```
 
 ### ❌ 其他禁止事项
