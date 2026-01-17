@@ -6,7 +6,7 @@ import multiprocessing
 import os
 import time
 from glob import glob
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,7 @@ from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
 
 logger = logging.getLogger(__name__)
+
 
 
 class ParticleTracker:
@@ -32,19 +33,67 @@ class ParticleTracker:
         self.hdf5_file_processor = HDF5FileProcessor(config_manager)
 
     @log_time(logger)
-    def get_particle_df_from_hdf5_file(self, df_dict: Dict[str, pd.DataFrame], 
-                                   particle_name: int) -> pd.DataFrame:
+    def get_particle_df_from_hdf5_file(
+        self, 
+        df_dict: Dict[str, pd.DataFrame], 
+        particle_name: Union[int, str],
+        hdf5_file_path: Optional[str] = None,
+        simu_name: Optional[str] = None,
+        save_cache: bool = False
+    ) -> Union[pd.DataFrame, Dict[int, pd.DataFrame]]:
         """
-        Track a specific particle's evolution through snapshots in an HDF5 file
+        Track particle(s) evolution through snapshots in an HDF5 file
         
         Args:
             df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames 
                     (obtained from HDF5FileProcessor.read_file)
                     Note: This dict contains data for MULTIPLE snapshots from ONE HDF5 file
-            particle_name: Particle Name to track (e.g. 94820)
+            particle_name: Particle Name to track (e.g. 94820) or 'all' to process all particles
+            hdf5_file_path: Path to HDF5 file (required when save_cache=True)
+            simu_name: Simulation name (required when save_cache=True)
+            save_cache: If True, save individual particle DataFrames to cache files
         
         Returns:
-            particle_history_df: DataFrame containing all time points for this particle
+            If particle_name is int: DataFrame containing all time points for this particle
+            If particle_name is 'all': Dict mapping particle_name -> DataFrame
+        """
+        # Handle 'all' particles mode
+        if particle_name == 'all':
+            if save_cache and (hdf5_file_path is None or simu_name is None):
+                raise ValueError("hdf5_file_path and simu_name are required when save_cache=True")
+            
+            single_df_all = df_dict['singles']
+            if single_df_all.empty or 'Name' not in single_df_all.columns:
+                logger.warning("No particles found in singles DataFrame")
+                return {}
+            
+            all_particle_names = single_df_all['Name'].unique()
+            result_dict = {}
+            
+            for pname in all_particle_names:
+                particle_df = self._get_single_particle_df(df_dict, pname)
+                
+                if save_cache and not particle_df.empty:
+                    self._save_particle_cache(particle_df, pname, hdf5_file_path, simu_name)
+                
+                result_dict[pname] = particle_df
+            
+            return result_dict
+        
+        # Single particle mode
+        return self._get_single_particle_df(df_dict, particle_name)
+    
+    def _get_single_particle_df(self, df_dict: Dict[str, pd.DataFrame], 
+                                particle_name: int) -> pd.DataFrame:
+        """
+        Extract a single particle's data from df_dict
+        
+        Args:
+            df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames
+            particle_name: Particle Name to track
+        
+        Returns:
+            DataFrame containing all time points for this particle in the HDF5 file
         """
         single_df_all = df_dict['singles']
         binary_df_all = df_dict['binaries']
@@ -73,22 +122,50 @@ class ParticleTracker:
         if binary_as_1.empty and binary_as_2.empty:
             single_particle_df['state'] = 'single'
             single_particle_df['companion_name'] = np.nan
-            particle_history_df = single_particle_df
+            particle_df = single_particle_df
         else:
             # Particle is in a binary
-            particle_history_df = single_particle_df.merge(
+            particle_df = single_particle_df.merge(
                     _binary,
                     on='TTOT',
                     how='outer',                 
                     suffixes=('', '_from_binary')  # Columns with same name from single vs binary get suffix
                 )
         
-        if not particle_history_df.empty:
-            particle_history_df = particle_history_df.sort_values('TTOT').reset_index(drop=True)
-            return particle_history_df
+        if not particle_df.empty:
+            particle_df = particle_df.sort_values('TTOT').reset_index(drop=True)
+            return particle_df
         else:
-            logger.warning(f"Warning: Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}")
+            logger.debug(f"Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}")
             return pd.DataFrame()
+    
+    def _save_particle_cache(self, particle_df: pd.DataFrame, particle_name: int,
+                            hdf5_file_path: str, simu_name: str) -> None:
+        """
+        Save particle DataFrame to cache file
+        
+        Args:
+            particle_df: DataFrame for a single particle from one HDF5 file
+            particle_name: Particle name
+            hdf5_file_path: Path to the HDF5 file
+            simu_name: Simulation name
+        """
+        # Get HDF5 file time from filename
+        hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
+        
+        # Create particle-specific subdirectory
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        particle_cache_dir = os.path.join(cache_base, str(particle_name))
+        os.makedirs(particle_cache_dir, exist_ok=True)
+        
+        # Save to feather file with naming: {hdf5_time}.{particle_name}.df.feather
+        cache_file = os.path.join(particle_cache_dir, f"{hdf5_time:.6f}.{particle_name}.df.feather")
+        
+        try:
+            particle_df.to_feather(cache_file)
+            logger.debug(f"Saved particle {particle_name} cache to {cache_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save particle {particle_name} cache: {e}")
 
     @log_time(logger)
     def get_particle_summary(self, particle_history_df: pd.DataFrame) -> Dict[str, Any]:

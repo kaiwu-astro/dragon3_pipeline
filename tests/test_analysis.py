@@ -200,6 +200,55 @@ class TestParticleTracker:
         
         assert len(result) == 1
         assert result['Name'].iloc[0] == 1000
+    
+    def test_get_particle_df_from_hdf5_file_all_particles(self, particle_tracker, sample_df_dict):
+        """Test processing all particles from HDF5 file"""
+        result = particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, 'all')
+        
+        # Should return a dict
+        assert isinstance(result, dict)
+        # Should have data for particles 1000 and 2000
+        assert 1000 in result
+        assert 2000 in result
+        # Each should be a DataFrame
+        assert isinstance(result[1000], pd.DataFrame)
+        assert isinstance(result[2000], pd.DataFrame)
+    
+    def test_get_particle_df_from_hdf5_file_all_with_cache(self, particle_tracker, sample_df_dict, mock_config, tmp_path):
+        """Test processing all particles with save_cache=True"""
+        # Update config to use temp directory
+        mock_config.particle_df_cache_dir_of['test_simu'] = str(tmp_path)
+        
+        # Mock the HDF5 file processor to return a fake time
+        with patch.object(particle_tracker.hdf5_file_processor, 'get_hdf5_file_time_from_filename', return_value=1.5):
+            result = particle_tracker.get_particle_df_from_hdf5_file(
+                sample_df_dict, 
+                'all',
+                hdf5_file_path='/fake/path/snap.40_1.5.h5part',
+                simu_name='test_simu',
+                save_cache=True
+            )
+        
+        # Should have processed particles
+        assert isinstance(result, dict)
+        assert len(result) > 0
+        
+        # Check that cache files were created for each particle
+        for particle_name in result.keys():
+            if not result[particle_name].empty:
+                particle_dir = tmp_path / str(particle_name)
+                assert particle_dir.exists()
+                cache_files = list(particle_dir.glob('*.feather'))
+                assert len(cache_files) > 0
+    
+    def test_get_particle_df_from_hdf5_file_all_requires_params(self, particle_tracker, sample_df_dict):
+        """Test that 'all' mode with save_cache requires hdf5_file_path and simu_name"""
+        with pytest.raises(ValueError, match="hdf5_file_path and simu_name are required"):
+            particle_tracker.get_particle_df_from_hdf5_file(
+                sample_df_dict, 
+                'all',
+                save_cache=True
+            )
 
 
 class TestPhysics:
