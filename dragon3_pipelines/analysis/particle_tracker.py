@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
+from glob import glob
 
 try:
     import lz4
@@ -471,23 +472,6 @@ class ParticleTracker:
                     )
             except Exception as e:
                 logger.warning(f"Failed to read merged cache {merged_cache_path}: {e}")
-
-        # 1b. Fall back to old cache format: {particle_name}_ALL.df.feather
-        if old_particle_history_df.empty:
-            all_feather_path = os.path.join(cache_base, f"{particle_name}_ALL.df.feather")
-            if os.path.exists(all_feather_path):
-                try:
-                    old_particle_history_df = pd.read_feather(all_feather_path)
-                    if (
-                        not old_particle_history_df.empty
-                        and "TTOT" in old_particle_history_df.columns
-                    ):
-                        particle_skip_until = old_particle_history_df["TTOT"].max()
-                        logger.info(
-                            f"Loaded old format cache for particle {particle_name}, records: {len(old_particle_history_df)}, max TTOT: {particle_skip_until}"
-                        )
-                except Exception as e:
-                    logger.warning(f"Failed to read old cache {all_feather_path}: {e}")
 
         if not update:
             return old_particle_history_df
