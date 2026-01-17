@@ -70,16 +70,20 @@ class ParticleTracker:
             result_dict = {}
 
             for pname in all_particle_names:
-                particle_df = self._get_single_particle_df(df_dict, pname)
+                particle_df = self._get_single_particle_df(df_dict, int(pname))
 
                 if save_cache and not particle_df.empty:
-                    self._save_particle_cache(particle_df, pname, hdf5_file_path, simu_name)
+                    # Type assertion: we know these are not None due to check at line 61
+                    assert hdf5_file_path is not None
+                    assert simu_name is not None
+                    self._save_particle_cache(particle_df, int(pname), hdf5_file_path, simu_name)
 
-                result_dict[pname] = particle_df
+                result_dict[int(pname)] = particle_df
 
             return result_dict
 
-        # Single particle mode
+        # Single particle mode (must be int at this point)
+        assert isinstance(particle_name, int), "particle_name must be int in single mode"
         return self._get_single_particle_df(df_dict, particle_name)
 
     def _get_single_particle_df(
