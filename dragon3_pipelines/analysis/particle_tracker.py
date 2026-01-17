@@ -4,8 +4,6 @@ import gc
 import logging
 import multiprocessing
 import os
-import time
-from glob import glob
 from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
@@ -489,14 +487,7 @@ class ParticleTracker:
             return old_particle_history_df
 
         # 2. Get and filter file list
-        # 获取所有HDF5文件
-        hdf5_files = sorted(
-            glob(self.config.pathof[simu_name] + "/**/*.h5part"),
-            key=lambda fn: self.hdf5_file_processor.get_hdf5_file_time_from_filename(fn),
-        )
-        WAIT_HDF5_FILE_AGE_HOUR = 24
-        cutoff = time.time() - WAIT_HDF5_FILE_AGE_HOUR * 3600
-        hdf5_files = [fn for fn in hdf5_files if os.path.getmtime(fn) <= cutoff]
+        hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)
 
         files_to_process = [
             f
@@ -616,22 +607,7 @@ class ParticleTracker:
             merge_interval: Number of HDF5 files to process before merging caches (default: 10)
         """
         # 1. Get all HDF5 files
-        hdf5_files = sorted(
-            glob(self.config.pathof[simu_name] + "/**/*.h5part"),
-            key=lambda fn: self.hdf5_file_processor.get_hdf5_file_time_from_filename(fn),
-        )
-        if not hdf5_files:
-            logger.error(f"No HDF5 files found for simulation {simu_name}")
-            return
-
-        # Filter out files that are too new (still being written)
-        WAIT_HDF5_FILE_AGE_HOUR = 24
-        cutoff = time.time() - WAIT_HDF5_FILE_AGE_HOUR * 3600
-        hdf5_files = [fn for fn in hdf5_files if os.path.getmtime(fn) <= cutoff]
-
-        if not hdf5_files:
-            logger.warning(f"No HDF5 files old enough to process for simulation {simu_name}")
-            return
+        hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
 
         # 2. Read progress file to skip already-processed files
         last_processed_time = self._read_progress_file(simu_name)

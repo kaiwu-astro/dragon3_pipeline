@@ -136,16 +136,7 @@ class SimulationPlotter:
             self.plot_lagr(simu_name)
 
             # 获取所有HDF5文件
-            hdf5_files = sorted(
-                glob(self.config.pathof[simu_name] + '/**/*.h5part'), 
-                key=lambda fn: self.hdf5_file_processor.get_hdf5_file_time_from_filename(fn)
-            )
-            WAIT_HDF5_FILE_AGE_HOUR = 24
-            cutoff = time.time() - WAIT_HDF5_FILE_AGE_HOUR * 3600
-            hdf5_files = [
-                fn for fn in hdf5_files
-                if os.path.getmtime(fn) <= cutoff
-            ]
+            hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)
             
             # 创建带固定参数的部分函数
             process_file_partial = functools.partial(

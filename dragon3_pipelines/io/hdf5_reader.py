@@ -1,8 +1,11 @@
 """HDF5 file reading and processing"""
 
 import logging
+import os
+import time
 import warnings
-from typing import Dict, Optional, Tuple
+from glob import glob
+from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
 import h5py
@@ -498,3 +501,25 @@ class HDF5FileProcessor:
         else:
             logger.debug(f"No hierarchical triples found at ttot={ttot}")
             return pd.DataFrame()
+
+    def get_all_hdf5_paths(self, simu_name: str, wait_age_hour: int = 24) -> List[str]:
+        """
+        Get all HDF5 file paths for a simulation, sorted by time
+        
+        Args:
+            simu_name: Name of the simulation
+            wait_age_hour: Wait time in hours before processing a file (to ensure it's completely written)
+            
+        Returns:
+            List of HDF5 file paths sorted by time, excluding files younger than wait_age_hour
+        """
+        hdf5_files = sorted(
+            glob(self.config.pathof[simu_name] + '/**/*.h5part', recursive=True), 
+            key=lambda fn: self.get_hdf5_file_time_from_filename(fn)
+        ) # recursive allows symlink
+        cutoff = time.time() - wait_age_hour * 3600
+        hdf5_files = [
+            fn for fn in hdf5_files
+            if os.path.getmtime(fn) <= cutoff
+        ]
+        return hdf5_files
