@@ -15,7 +15,7 @@ if sys.version_info < (3, 11):
     raise RuntimeError("Need python >= 3.11")
 
 import os
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "10"
 
 # Import main function and SimulationPlotter from the new package
 from dragon3_pipelines.__main__ import main, SimulationPlotter

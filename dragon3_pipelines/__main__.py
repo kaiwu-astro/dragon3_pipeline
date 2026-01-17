@@ -3,7 +3,7 @@
 Main entry point for dragon3_pipelines CLI
 """
 import os
-os.environ["OPENBLAS_NUM_THREADS"] = "4"  # 限制线程数避免forkserver问题
+os.environ["OPENBLAS_NUM_THREADS"] = "10"  # 限制线程数避免forkserver问题
 
 import sys
 import gc

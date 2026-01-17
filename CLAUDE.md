@@ -248,19 +248,11 @@ pre-commit install
 
 ### 并行处理注意事项
 
-**使用 forkserver 上下文：**
-```python
-import multiprocessing
-ctx = multiprocessing.get_context('forkserver')
-with ctx.Pool(processes=config.processes_count) as pool:
-    results = pool.map(process_func, items)
-```
-
 **设置 OpenBLAS 线程数：**
-在主程序开始时设置（避免 forkserver 问题）：
+由于使用了multiprocessing，内部有pandas DataFrame会用到OpenBLAS，如果不手动限制，可能导致进程数×线程数超过系统限制。
 ```python
 import os
-os.environ["OPENBLAS_NUM_THREADS"] = "4"
+os.environ["OPENBLAS_NUM_THREADS"] = "10"
 ```
 
 **内存管理：**
