@@ -138,8 +138,8 @@ class ParticleTracker:
             return pd.DataFrame()
 
     @log_time(logger)
-    def get_particle_df_all(self, simu_name: str, particle_name: int, 
-                               update: bool = True) -> pd.DataFrame:
+    def update_one_particle_history_df(self, simu_name: str, particle_name: int, 
+                                        update: bool = True) -> pd.DataFrame:
         """
         Get complete evolution history of a particle throughout the simulation
         Uses caching and parallel processing
@@ -158,20 +158,20 @@ class ParticleTracker:
         all_feather_path = os.path.join(cache_base, f"{particle_name}_ALL.df.feather")
         
         # 1. Read existing aggregated cache
-        old_df_all = pd.DataFrame()
+        old_particle_history_df = pd.DataFrame()
         particle_skip_until = -1.0
         
         if os.path.exists(all_feather_path):
             try:
-                old_df_all = pd.read_feather(all_feather_path)
-                if not old_df_all.empty and 'TTOT' in old_df_all.columns:
-                    particle_skip_until = old_df_all['TTOT'].max()
-                    logger.info(f"Loaded existing particle df for {particle_name}, records: {len(old_df_all)}, max TTOT: {particle_skip_until}")
+                old_particle_history_df = pd.read_feather(all_feather_path)
+                if not old_particle_history_df.empty and 'TTOT' in old_particle_history_df.columns:
+                    particle_skip_until = old_particle_history_df['TTOT'].max()
+                    logger.info(f"Loaded existing particle df for {particle_name}, records: {len(old_particle_history_df)}, max TTOT: {particle_skip_until}")
             except Exception as e:
                 logger.warning(f"Failed to read aggregated cache {all_feather_path}: {e}")
 
         if not update:
-            return old_df_all
+            return old_particle_history_df
         
         # 2. Get and filter file list
         # 获取所有HDF5文件
@@ -190,7 +190,7 @@ class ParticleTracker:
         
         if not files_to_process:
             logger.info(f"No new HDF5 files to process for particle {particle_name}")
-            return old_df_all
+            return old_particle_history_df
 
         logger.info(f"Found {len(files_to_process)} new HDF5 files to process for particle {particle_name}: {files_to_process[0]} ... {files_to_process[-1]}")
 
@@ -201,7 +201,7 @@ class ParticleTracker:
             
 
         # 4. Parallel processing
-        new_dfs = []
+        new_particle_dfs = []
         consecutive_missing_count = 0
         MISSING_THRESHOLD = 5  # Particle may be merged/ejected, stop searching after threshold
 
@@ -215,9 +215,9 @@ class ParticleTracker:
             tqdm_iterator = tqdm(iterator, total=len(tasks), desc=f"Tracking {particle_name} in {simu_name}")
 
             try:
-                for res_df in tqdm_iterator:
-                    if res_df is not None and not res_df.empty:
-                        new_dfs.append(res_df)
+                for particle_df in tqdm_iterator:
+                    if particle_df is not None and not particle_df.empty:
+                        new_particle_dfs.append(particle_df)
                         consecutive_missing_count = 0  # Reset counter
                     else:
                         consecutive_missing_count += 1
@@ -230,30 +230,30 @@ class ParticleTracker:
                 logger.warning(f"Process pool interrupted or error occurred: {e}")
         
         # 5. Merge and save
-        if new_dfs:
-            new_df_concat = pd.concat(new_dfs, ignore_index=True)
-            if not old_df_all.empty:
-                new_df_all = pd.concat([old_df_all, new_df_concat], ignore_index=True)
+        if new_particle_dfs:
+            new_particle_df_concat = pd.concat(new_particle_dfs, ignore_index=True)
+            if not old_particle_history_df.empty:
+                new_particle_history_df = pd.concat([old_particle_history_df, new_particle_df_concat], ignore_index=True)
             else:
-                new_df_all = new_df_concat
+                new_particle_history_df = new_particle_df_concat
             
             # Deduplicate and sort
-            if 'TTOT' in new_df_all.columns:
-                new_df_all = new_df_all.sort_values('TTOT').drop_duplicates(subset=['TTOT'], keep='last').reset_index(drop=True)
+            if 'TTOT' in new_particle_history_df.columns:
+                new_particle_history_df = new_particle_history_df.sort_values('TTOT').drop_duplicates(subset=['TTOT'], keep='last').reset_index(drop=True)
             
             # Save aggregated result
             try:
-                new_df_all.to_feather(all_feather_path)
+                new_particle_history_df.to_feather(all_feather_path)
                 logger.info(f"Updated aggregated cache for {particle_name} at {all_feather_path}")
             except Exception as e:
                 logger.error(f"Failed to save aggregated cache: {e}")
             
-            return new_df_all
+            return new_particle_history_df
         else:
-            return old_df_all
+            return old_particle_history_df
 
     @log_time(logger)
-    def save_every_particle_df_of_sim(self, simu_name: str) -> None:
+    def update_all_particle_history_df(self, simu_name: str) -> None:
         """
         Get and save particle dataframes for all particles in the simulation
         
@@ -294,10 +294,10 @@ class ParticleTracker:
         
         for particle_name in tqdm(all_particle_names, desc=f"Saving all particles in {simu_name}"):
             try:
-                particle_df = None
-                particle_df = self.get_particle_df_all(simu_name, particle_name, update=True)
+                particle_history_df = None
+                particle_history_df = self.update_one_particle_history_df(simu_name, particle_name, update=True)
                 
-                if not particle_df.empty:
+                if not particle_history_df.empty:
                     successful_count += 1
                 else:
                     logger.warning(f"Empty dataframe returned for particle {particle_name}")
@@ -311,3 +311,23 @@ class ParticleTracker:
                 gc.collect()
         
         logger.info(f"Completed saving particles in {simu_name}: {successful_count} successful, {failed_count} failed")
+    
+    # Backward compatibility aliases
+    def get_particle_df_all(self, simu_name: str, particle_name: int, 
+                           update: bool = True) -> pd.DataFrame:
+        """
+        Backward compatibility alias for update_one_particle_history_df
+        
+        .. deprecated:: 0.2.0
+            Use :meth:`update_one_particle_history_df` instead.
+        """
+        return self.update_one_particle_history_df(simu_name, particle_name, update)
+    
+    def save_every_particle_df_of_sim(self, simu_name: str) -> None:
+        """
+        Backward compatibility alias for update_all_particle_history_df
+        
+        .. deprecated:: 0.2.0
+            Use :meth:`update_all_particle_history_df` instead.
+        """
+        return self.update_all_particle_history_df(simu_name)
