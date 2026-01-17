@@ -10,6 +10,11 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
+try:
+    import lz4
+except ImportError:
+    pass
+
 from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
 
@@ -32,8 +37,8 @@ class ParticleTracker:
     @log_time(logger)
     def get_particle_df_from_hdf5_file(
         self,
-        df_dict: Dict[str, pd.DataFrame],
-        particle_name: Union[int, str],
+        df_dict: Optional[Dict[str, pd.DataFrame]] = None,
+        particle_name: Union[int, str] = "all",
         hdf5_file_path: Optional[str] = None,
         simu_name: Optional[str] = None,
         save_cache: bool = False,
@@ -44,7 +49,6 @@ class ParticleTracker:
         Args:
             df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames
                     (obtained from HDF5FileProcessor.read_file)
-                    Note: This dict contains data for MULTIPLE snapshots from ONE HDF5 file
             particle_name: Particle Name to track (e.g. 94820) or 'all' to process all particles
             hdf5_file_path: Path to HDF5 file (required when save_cache=True)
             simu_name: Simulation name (required when save_cache=True)
@@ -58,6 +62,8 @@ class ParticleTracker:
         if particle_name == "all":
             if save_cache and (hdf5_file_path is None or simu_name is None):
                 raise ValueError("hdf5_file_path and simu_name are required when save_cache=True")
+            
+            df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
 
             single_df_all = df_dict["singles"]
             if single_df_all.empty or "Name" not in single_df_all.columns:
@@ -152,7 +158,7 @@ class ParticleTracker:
         self, particle_df: pd.DataFrame, particle_name: int, hdf5_file_path: str, simu_name: str
     ) -> None:
         """
-        Save particle DataFrame to cache file
+        Save particle DataFrame to cache file (feather)
 
         Args:
             particle_df: DataFrame for a single particle from one HDF5 file

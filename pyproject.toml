@@ -28,7 +28,6 @@ dependencies = [
     "astropy>=7.0.1",
     "colour>=0.1.5",
     "h5py>=3.13.0",
-    "lz4",
     "matplotlib>=3.10.3",
     "numpy>=2.2.6",
     "pandas>=2.3.0",
@@ -46,6 +45,7 @@ dev = [
     "black>=23.0",
     "ruff>=0.1.0",
     "mypy>=1.0",
+    "lz4",
 ]
 
 [project.scripts]
