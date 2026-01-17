@@ -161,37 +161,6 @@ def process_data(
 
 详见 `docs/api.md`
 
-### 公共接口必须保持向后兼容
-
-以下类和函数构成公共 API，**不得破坏现有签名**：
-
-**配置模块：**
-- `ConfigManager` 类
-- `load_config()` 函数
-
-**I/O 模块：**
-- `HDF5FileProcessor` 类及其方法
-- `LagrFileProcessor` 类及其方法
-- `text_parsers` 模块中的解析函数
-
-**分析模块：**
-- `ParticleTracker` 类及其方法
-- `tau_gw` 模块中的计算函数
-
-**可视化模块：**
-- `BaseVisualizer` 基类
-- `BaseHDF5Visualizer` 基类
-- `SingleStarVisualizer` 类
-- `BinaryStarVisualizer` 类
-- `LagrVisualizer` 类
-- `CollCoalVisualizer` 类
-
-**工具模块：**
-- `save()`, `read()` 序列化函数
-- `get_output()` shell 命令执行
-- `log_time` 装饰器
-- `BlackbodyColorConverter` 类
-
 ### 扩展原则
 - ✅ **可以**添加新的可选参数（必须有默认值）
 - ✅ **可以**添加新的方法和类
@@ -395,7 +364,6 @@ class DataProcessor:
 
 ### ❌ 其他禁止事项
 
-- **禁止删除或重命名公共 API**（见"API 兼容性约束"章节）
 - **禁止在代码中硬编码绝对路径**（应使用配置或相对路径）
 - **禁止在测试中依赖外部数据文件**（使用 mock 或生成测试数据）
 - **禁止提交包含敏感信息的文件**（如 API 密钥、私有路径等）
