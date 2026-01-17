@@ -3,6 +3,7 @@
 import logging
 import warnings
 from typing import Dict, Optional, Tuple
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -20,9 +21,52 @@ class HDF5FileProcessor:
     """Read and preprocess HDF5 data for plotting"""
     def __init__(self, config_manager):
         self.config = config_manager
-    
+
+    def _get_feather_path_of(self, hdf5_path: str) -> Dict[str, str]:
+        return {
+            "scalars": f"{hdf5_path}.scalars.df.feather",
+            "singles": f"{hdf5_path}.singles.df.feather",
+            "binaries": f"{hdf5_path}.binaries.df.feather",
+            "mergers": f"{hdf5_path}.mergers.df.feather",
+        }
+
+    def _cache_is_complete(self, feather_path_of: Dict[str, str]) -> bool:
+        return all(Path(p).is_file() for p in feather_path_of.values())
+
+    def _read_df_dict_from_cache(self, feather_path_of: Dict[str, str]) -> Dict[str, pd.DataFrame]:
+        df_dict = {
+            "scalars": pd.read_feather(feather_path_of["scalars"]),
+            "singles": pd.read_feather(feather_path_of["singles"]),
+            "binaries": pd.read_feather(feather_path_of["binaries"]),
+            "mergers": pd.read_feather(feather_path_of["mergers"]),
+        }
+        if "TTOT" not in df_dict["scalars"].columns:
+            raise ValueError("[cache] scalars feather missing column 'TTOT'; cannot set index.")
+        df_dict["scalars"] = df_dict["scalars"].set_index("TTOT", drop=False)
+        return df_dict
+
+    def _write_df_dict_to_cache(self, df_dict: Dict[str, pd.DataFrame], feather_path_of: Dict[str, str]) -> None:
+        for key, path in feather_path_of.items():
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            df = df_dict.get(key)
+            if df is None:
+                pd.DataFrame().to_feather(path)
+                continue
+
+            if key == "scalars" and "TTOT" not in df.columns:
+                df = df.copy()
+                df["TTOT"] = df.index.to_numpy()
+
+            df.to_feather(path)
+
     @log_time(logger)
-    def read_file(self, hdf5_path: str, simu_name: Optional[str] = None, N0: Optional[int] = None) -> Dict[str, pd.DataFrame]:
+    def read_file(
+        self,
+        hdf5_path: str,
+        simu_name: Optional[str] = None,
+        N0: Optional[int] = None,
+        use_cache: bool = False,
+    ) -> Dict[str, pd.DataFrame]:
         """
         Load and preprocess HDF5 data. Extract multiple DataFrames from a single HDF5 file containing snapshots at multiple times.
         
@@ -33,16 +77,30 @@ class HDF5FileProcessor:
             hdf5_path: Path to HDF5 file
             simu_name: Used to get initial condition file path and read N0
             N0: Initial particle count (required if simu_name is None)
+            use_cache: Read from Feather cache if exist + create cache after reading if not exist
         
         Returns:
             df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
                      Each DataFrame contains data for ALL snapshots in this HDF5 file
         """
-        from dragon3_pipelines.io.text_parsers import get_valueStr_of_namelist_key, get_scale_dict_from_hdf5_df, dataframes_from_hdf5_file
+        from dragon3_pipelines.io.text_parsers import (
+            get_valueStr_of_namelist_key,
+            get_scale_dict_from_hdf5_df,
+            dataframes_from_hdf5_file,
+        )
         from dragon3_pipelines.io.text_parsers import tau_gw
-        
+
         logger.debug(f"\nProcessing {hdf5_path=}...")
-        
+
+        feather_path_of = self._get_feather_path_of(hdf5_path)
+        if use_cache and self._cache_is_complete(feather_path_of):
+            try:
+                df_dict = self._read_df_dict_from_cache(feather_path_of)
+                logger.info(f"[cache] Loaded feather cache for {hdf5_path}")
+                return df_dict
+            except Exception as e:
+                pass
+
         # 获取数据框
         df_dict = dataframes_from_hdf5_file(hdf5_path)
         if N0 is None:
@@ -141,11 +199,21 @@ class HDF5FileProcessor:
         binary_df_all['tau_gw[Myr]'] = np.minimum(self.config.universe_age_myr, binary_df_all['tau_gw[Myr]'])
 
         # 处理merger数据
-        merger_df_all = df_dict['mergers']
-        if merger_df_all is not None and not merger_df_all.empty and 'TTOT' in merger_df_all.columns:
+        merger_df_all = df_dict.get('mergers')
+        if merger_df_all is None:
+            merger_df_all = pd.DataFrame()
+            df_dict['mergers'] = merger_df_all
+        if not merger_df_all.empty and 'TTOT' in merger_df_all.columns:
             merger_df_all['TTOT/TCR0'] = merger_df_all['TTOT'].map(scalar_df_all['TTOT/TCR0'])
             merger_df_all['TTOT/TRH0'] = merger_df_all['TTOT/TCR0'] / (0.1 * N0 / np.log(0.4*N0))
             merger_df_all['Time[Myr]'] = merger_df_all['TTOT'] * scale_dict['t']
+
+        if use_cache:
+            try:
+                self._write_df_dict_to_cache(df_dict, feather_path_of)
+                logger.info(f"[cache] Wrote feather cache for {hdf5_path}")
+            except Exception as e:
+                logger.warning(f"[cache] Failed to write feather cache for {hdf5_path}. err={e!r}")
 
         return df_dict
     
