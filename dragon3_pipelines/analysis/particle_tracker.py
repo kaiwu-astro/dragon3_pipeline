@@ -4,7 +4,7 @@ import gc
 import logging
 import multiprocessing
 import os
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, Iterable
 
 import numpy as np
 import pandas as pd
@@ -39,7 +39,7 @@ class ParticleTracker:
     def get_particle_df_from_hdf5_file(
         self,
         df_dict: Optional[Dict[str, pd.DataFrame]] = None,
-        particle_name: Union[int, str] = "all",
+        particle_name: Union[int, Iterable[int]] = "all",
         hdf5_file_path: Optional[str] = None,
         simu_name: Optional[str] = None,
         save_cache: bool = False,
@@ -50,46 +50,50 @@ class ParticleTracker:
         Args:
             df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames
                     (obtained from HDF5FileProcessor.read_file)
-            particle_name: Particle Name to track (e.g. 94820) or 'all' to process all particles
-            hdf5_file_path: Path to HDF5 file (required when save_cache=True)
-            simu_name: Simulation name (required when save_cache=True)
+            particle_name: Particle Name to track (int) or list-like of ints
+            hdf5_file_path: Path to HDF5 file (required when df_dict is None or save_cache=True)
+            simu_name: Simulation name (required when df_dict is None or save_cache=True)
             save_cache: If True, save individual particle DataFrames to cache files
 
         Returns:
             If particle_name is int: DataFrame containing all time points for this particle
-            If particle_name is 'all': Dict mapping particle_name -> DataFrame
+            If particle_name is list-like: Dict mapping particle_name -> DataFrame
         """
-        # Handle 'all' particles mode
-        if particle_name == "all":
-            if save_cache and (hdf5_file_path is None or simu_name is None):
-                raise ValueError("hdf5_file_path and simu_name are required when save_cache=True")
-            
+        if isinstance(particle_name, (int, np.integer)):
+            assert df_dict is not None, "df_dict is required for single-particle mode"
+            return self._get_single_particle_df(df_dict, int(particle_name))
+
+        if df_dict is None:
+            if hdf5_file_path is None or simu_name is None:
+                raise ValueError("hdf5_file_path and simu_name are required when df_dict is None")
             df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
 
-            single_df_all = df_dict["singles"]
-            if single_df_all.empty or "Name" not in single_df_all.columns:
-                logger.warning("No particles found in singles DataFrame")
-                return {}
+        if save_cache and (hdf5_file_path is None or simu_name is None):
+            raise ValueError("hdf5_file_path and simu_name are required when save_cache=True")
 
-            all_particle_names = single_df_all["Name"].unique()
-            result_dict = {}
+        try:
+            particle_names = [int(p) for p in particle_name]  # list-like
+        except TypeError:
+            raise ValueError("particle_name must be int or list-like of ints")
 
-            for pname in all_particle_names:
-                particle_df = self._get_single_particle_df(df_dict, int(pname))
+        if not particle_names:
+            return {}
 
-                if save_cache and not particle_df.empty:
-                    # Type assertion: we know these are not None due to check at line 61
-                    assert hdf5_file_path is not None
-                    assert simu_name is not None
-                    self._save_particle_cache(particle_df, int(pname), hdf5_file_path, simu_name)
+        result_dict = {}
+        for pname in tqdm(
+            particle_names,
+            desc=(
+                f"Writing cache for particles in {os.path.basename(hdf5_file_path)}"
+            ),
+        ):
+            particle_df = self._get_single_particle_df(df_dict, int(pname))
+            if save_cache and not particle_df.empty:
+                assert hdf5_file_path is not None
+                assert simu_name is not None
+                self._save_particle_cache(particle_df, int(pname), hdf5_file_path, simu_name)
+            result_dict[int(pname)] = particle_df
 
-                result_dict[int(pname)] = particle_df
-
-            return result_dict
-
-        # Single particle mode (must be int at this point)
-        assert isinstance(particle_name, int), "particle_name must be int in single mode"
-        return self._get_single_particle_df(df_dict, particle_name)
+        return result_dict
 
     def _get_single_particle_df(
         self, df_dict: Dict[str, pd.DataFrame], particle_name: int
@@ -581,21 +585,29 @@ class ParticleTracker:
             return old_particle_history_df
 
     @log_time(logger)
-    def update_all_particle_history_df(self, simu_name: str, merge_interval: int = 10) -> None:
+    def update_multiple_particle_history_df(
+        self, simu_name: str, particle_names: Iterable[int], merge_interval: int = 3
+    ) -> None:
         """
-        Process all particles in the simulation using HDF5-centric iteration
+        Process specified particles in the simulation using HDF5-centric iteration
 
-        This method iterates through HDF5 files (not particles) for efficiency:
+        This method iterates through HDF5 files for efficiency:
         1. Reads the progress file to skip already-processed files
-        2. For each unprocessed HDF5 file, extracts data for ALL particles at once
+        2. For each unprocessed HDF5 file, extracts data for specified particles
         3. Saves individual particle cache files
         4. Periodically merges temporary cache files to avoid inode limits
         5. Updates progress file after each HDF5 file
 
         Args:
             simu_name: Name of the simulation
+            particle_names: List-like of particle names (ints)
             merge_interval: Number of HDF5 files to process before merging caches (default: 10)
         """
+        particle_names = [int(p) for p in particle_names]
+        if not particle_names:
+            logger.info("No particle_names provided, nothing to process")
+            return
+
         # 1. Get all HDF5 files
         hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
 
@@ -627,10 +639,9 @@ class ParticleTracker:
                 # Read HDF5 file
                 df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
 
-                # Process all particles in this HDF5 file at once
                 _ = self.get_particle_df_from_hdf5_file(
                     df_dict,
-                    particle_name="all",
+                    particle_name=particle_names,
                     hdf5_file_path=hdf5_file_path,
                     simu_name=simu_name,
                     save_cache=True,
@@ -676,11 +687,11 @@ class ParticleTracker:
         """
         return self.update_one_particle_history_df(simu_name, particle_name, update)
 
-    def save_every_particle_df_of_sim(self, simu_name: str) -> None:
+    def save_every_particle_df_of_sim(self, simu_name: str, particle_names: Iterable[int]) -> None:
         """
-        Backward compatibility alias for update_all_particle_history_df
+        Backward compatibility alias for update_multiple_particle_history_df
 
         .. deprecated:: 0.2.0
-            Use :meth:`update_all_particle_history_df` instead.
+            Use :meth:`update_multiple_particle_history_df` instead.
         """
-        return self.update_all_particle_history_df(simu_name)
+        return self.update_multiple_particle_history_df(simu_name, particle_names)
