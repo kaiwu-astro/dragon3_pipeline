@@ -166,6 +166,163 @@ class ParticleTracker:
             logger.debug(f"Saved particle {particle_name} cache to {cache_file}")
         except Exception as e:
             logger.warning(f"Failed to save particle {particle_name} cache: {e}")
+    
+    def _read_progress_file(self, simu_name: str) -> float:
+        """
+        Read the progress file to get the last processed HDF5 time
+        
+        Args:
+            simu_name: Simulation name
+        
+        Returns:
+            Last processed HDF5 time (or -1.0 if no progress file exists)
+        """
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        progress_file = os.path.join(cache_base, '_progress.txt')
+        
+        if not os.path.exists(progress_file):
+            return -1.0
+        
+        try:
+            with open(progress_file, 'r') as f:
+                content = f.read().strip()
+                if content:
+                    return float(content)
+        except Exception as e:
+            logger.warning(f"Failed to read progress file {progress_file}: {e}")
+        
+        return -1.0
+    
+    def _write_progress_file(self, simu_name: str, hdf5_time: float) -> None:
+        """
+        Write the progress file with the last processed HDF5 time
+        
+        Args:
+            simu_name: Simulation name
+            hdf5_time: HDF5 file time to record
+        """
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        os.makedirs(cache_base, exist_ok=True)
+        progress_file = os.path.join(cache_base, '_progress.txt')
+        
+        try:
+            with open(progress_file, 'w') as f:
+                f.write(f"{hdf5_time}\n")
+            logger.debug(f"Updated progress file to {hdf5_time}")
+        except Exception as e:
+            logger.warning(f"Failed to write progress file {progress_file}: {e}")
+    
+    def _merge_and_cleanup_particle_cache(self, simu_name: str) -> None:
+        """
+        Merge temporary particle cache files into consolidated history files
+        
+        This function:
+        1. Iterates through all particle subdirectories
+        2. Reads all temporary feather files for each particle
+        3. Merges them into a single {particle_name}_history_until_{max_ttot:.2f}.df.feather file
+        4. Deletes old merged files and temporary files
+        
+        Args:
+            simu_name: Simulation name
+        """
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        
+        if not os.path.exists(cache_base):
+            logger.warning(f"Cache directory does not exist: {cache_base}")
+            return
+        
+        # Find all particle subdirectories
+        particle_dirs = [d for d in os.listdir(cache_base) 
+                        if os.path.isdir(os.path.join(cache_base, d)) and d.isdigit()]
+        
+        if not particle_dirs:
+            logger.info("No particle subdirectories found to merge")
+            return
+        
+        logger.info(f"Merging cache for {len(particle_dirs)} particles in {simu_name}")
+        
+        for particle_name_str in tqdm(particle_dirs, desc="Merging particle caches"):
+            particle_name = int(particle_name_str)
+            particle_dir = os.path.join(cache_base, particle_name_str)
+            
+            try:
+                # Find all temporary feather files (format: {time}.{particle_name}.df.feather)
+                temp_files = sorted(glob(os.path.join(particle_dir, "*.df.feather")))
+                
+                # Skip already-merged history files
+                temp_files = [f for f in temp_files if not os.path.basename(f).startswith(f"{particle_name}_history_until_")]
+                
+                if not temp_files:
+                    logger.debug(f"No temporary files to merge for particle {particle_name}")
+                    continue
+                
+                # Read all temporary files
+                particle_dfs = []
+                for temp_file in temp_files:
+                    try:
+                        df = pd.read_feather(temp_file)
+                        if not df.empty:
+                            particle_dfs.append(df)
+                    except Exception as e:
+                        logger.warning(f"Failed to read {temp_file}: {e}")
+                
+                if not particle_dfs:
+                    logger.warning(f"No valid data found for particle {particle_name}")
+                    continue
+                
+                # Merge all DataFrames
+                merged_df = pd.concat(particle_dfs, ignore_index=True)
+                
+                # Sort and deduplicate by TTOT
+                if 'TTOT' in merged_df.columns:
+                    merged_df = merged_df.sort_values('TTOT').drop_duplicates(subset=['TTOT'], keep='last').reset_index(drop=True)
+                    max_ttot = merged_df['TTOT'].max()
+                else:
+                    logger.warning(f"No TTOT column found for particle {particle_name}")
+                    continue
+                
+                # Check if there's an existing merged file
+                old_merged_files = glob(os.path.join(particle_dir, f"{particle_name}_history_until_*.df.feather"))
+                
+                # If there's an old merged file, read it and merge with new data
+                if old_merged_files:
+                    for old_file in old_merged_files:
+                        try:
+                            old_df = pd.read_feather(old_file)
+                            if not old_df.empty:
+                                merged_df = pd.concat([old_df, merged_df], ignore_index=True)
+                                if 'TTOT' in merged_df.columns:
+                                    merged_df = merged_df.sort_values('TTOT').drop_duplicates(subset=['TTOT'], keep='last').reset_index(drop=True)
+                                    max_ttot = merged_df['TTOT'].max()
+                        except Exception as e:
+                            logger.warning(f"Failed to read old merged file {old_file}: {e}")
+                
+                # Save new merged file
+                new_merged_file = os.path.join(particle_dir, f"{particle_name}_history_until_{max_ttot:.2f}.df.feather")
+                merged_df.to_feather(new_merged_file)
+                logger.debug(f"Saved merged history for particle {particle_name} to {new_merged_file}")
+                
+                # Delete old merged files (with different max_ttot)
+                for old_file in old_merged_files:
+                    if old_file != new_merged_file:
+                        try:
+                            os.remove(old_file)
+                            logger.debug(f"Deleted old merged file: {old_file}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete old merged file {old_file}: {e}")
+                
+                # Delete temporary files
+                for temp_file in temp_files:
+                    try:
+                        os.remove(temp_file)
+                        logger.debug(f"Deleted temporary file: {temp_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete temporary file {temp_file}: {e}")
+                
+            except Exception as e:
+                logger.error(f"Failed to merge cache for particle {particle_name}: {e}")
+        
+        logger.info(f"Completed merging particle caches for {simu_name}")
 
     @log_time(logger)
     def get_particle_summary(self, particle_history_df: pd.DataFrame) -> Dict[str, Any]:
@@ -232,20 +389,41 @@ class ParticleTracker:
         cache_base = self.config.particle_df_cache_dir_of[simu_name]
         os.makedirs(cache_base, exist_ok=True)
         
-        all_feather_path = os.path.join(cache_base, f"{particle_name}_ALL.df.feather")
-        
-        # 1. Read existing aggregated cache
+        # Try to read from new merged cache format first
+        particle_dir = os.path.join(cache_base, str(particle_name))
         old_particle_history_df = pd.DataFrame()
         particle_skip_until = -1.0
         
-        if os.path.exists(all_feather_path):
+        # 1a. Check for new merged cache format: {particle_name}_history_until_*.df.feather
+        merged_cache_files = []
+        if os.path.exists(particle_dir):
+            merged_cache_files = sorted(
+                glob(os.path.join(particle_dir, f"{particle_name}_history_until_*.df.feather")),
+                reverse=True  # Get the latest one first
+            )
+        
+        if merged_cache_files:
+            # Use the latest merged cache file
+            merged_cache_path = merged_cache_files[0]
             try:
-                old_particle_history_df = pd.read_feather(all_feather_path)
+                old_particle_history_df = pd.read_feather(merged_cache_path)
                 if not old_particle_history_df.empty and 'TTOT' in old_particle_history_df.columns:
                     particle_skip_until = old_particle_history_df['TTOT'].max()
-                    logger.info(f"Loaded existing particle df for {particle_name}, records: {len(old_particle_history_df)}, max TTOT: {particle_skip_until}")
+                    logger.info(f"Loaded merged cache for particle {particle_name} from {merged_cache_path}, records: {len(old_particle_history_df)}, max TTOT: {particle_skip_until}")
             except Exception as e:
-                logger.warning(f"Failed to read aggregated cache {all_feather_path}: {e}")
+                logger.warning(f"Failed to read merged cache {merged_cache_path}: {e}")
+        
+        # 1b. Fall back to old cache format: {particle_name}_ALL.df.feather
+        if old_particle_history_df.empty:
+            all_feather_path = os.path.join(cache_base, f"{particle_name}_ALL.df.feather")
+            if os.path.exists(all_feather_path):
+                try:
+                    old_particle_history_df = pd.read_feather(all_feather_path)
+                    if not old_particle_history_df.empty and 'TTOT' in old_particle_history_df.columns:
+                        particle_skip_until = old_particle_history_df['TTOT'].max()
+                        logger.info(f"Loaded old format cache for particle {particle_name}, records: {len(old_particle_history_df)}, max TTOT: {particle_skip_until}")
+                except Exception as e:
+                    logger.warning(f"Failed to read old cache {all_feather_path}: {e}")
 
         if not update:
             return old_particle_history_df
@@ -317,25 +495,50 @@ class ParticleTracker:
             # Deduplicate and sort
             if 'TTOT' in new_particle_history_df.columns:
                 new_particle_history_df = new_particle_history_df.sort_values('TTOT').drop_duplicates(subset=['TTOT'], keep='last').reset_index(drop=True)
+                max_ttot = new_particle_history_df['TTOT'].max()
+            else:
+                max_ttot = 0.0
             
-            # Save aggregated result
+            # Save to new merged cache format in particle subdirectory
+            os.makedirs(particle_dir, exist_ok=True)
+            merged_cache_path = os.path.join(particle_dir, f"{particle_name}_history_until_{max_ttot:.2f}.df.feather")
+            
             try:
-                new_particle_history_df.to_feather(all_feather_path)
-                logger.info(f"Updated aggregated cache for {particle_name} at {all_feather_path}")
+                new_particle_history_df.to_feather(merged_cache_path)
+                logger.info(f"Updated merged cache for {particle_name} at {merged_cache_path}")
+                
+                # Clean up old merged files with different max_ttot
+                old_merged_files = glob(os.path.join(particle_dir, f"{particle_name}_history_until_*.df.feather"))
+                for old_file in old_merged_files:
+                    if old_file != merged_cache_path:
+                        try:
+                            os.remove(old_file)
+                            logger.debug(f"Deleted old merged cache: {old_file}")
+                        except Exception as e:
+                            logger.warning(f"Failed to delete old merged cache {old_file}: {e}")
+                
             except Exception as e:
-                logger.error(f"Failed to save aggregated cache: {e}")
+                logger.error(f"Failed to save merged cache: {e}")
             
             return new_particle_history_df
         else:
             return old_particle_history_df
 
     @log_time(logger)
-    def update_all_particle_history_df(self, simu_name: str) -> None:
+    def update_all_particle_history_df(self, simu_name: str, merge_interval: int = 10) -> None:
         """
-        Get and save particle dataframes for all particles in the simulation
+        Process all particles in the simulation using HDF5-centric iteration
+        
+        This method iterates through HDF5 files (not particles) for efficiency:
+        1. Reads the progress file to skip already-processed files
+        2. For each unprocessed HDF5 file, extracts data for ALL particles at once
+        3. Saves individual particle cache files
+        4. Periodically merges temporary cache files to avoid inode limits
+        5. Updates progress file after each HDF5 file
         
         Args: 
             simu_name: Name of the simulation
+            merge_interval: Number of HDF5 files to process before merging caches (default: 10)
         """
         # 1. Get all HDF5 files
         hdf5_files = sorted(
@@ -346,48 +549,70 @@ class ParticleTracker:
             logger.error(f"No HDF5 files found for simulation {simu_name}")
             return
         
-        # 2. Find the t=0 HDF5 file (first file)
-        t0_hdf5_file = hdf5_files[0]
+        # Filter out files that are too new (still being written)
+        WAIT_HDF5_FILE_AGE_HOUR = 24
+        cutoff = time.time() - WAIT_HDF5_FILE_AGE_HOUR * 3600
+        hdf5_files = [fn for fn in hdf5_files if os.path.getmtime(fn) <= cutoff]
         
-        # 3. Read t=0 HDF5 file and get all particle names
-        try:
-            df_dict = self.hdf5_file_processor.read_file(t0_hdf5_file, simu_name)
-            single_df = df_dict['singles']
-            
-            if single_df.empty or 'Name' not in single_df.columns:
-                logger.error(f"No particles found in initial HDF5 file {t0_hdf5_file}")
-                return
-            
-            all_particle_names = single_df['Name'].unique()
-            logger.info(f"Found {len(all_particle_names)} particles in simulation {simu_name}")
-            
-        except Exception as e:
-            logger.error(f"Failed to read initial HDF5 file {t0_hdf5_file}: {type(e).__name__}: {e}")
+        if not hdf5_files:
+            logger.warning(f"No HDF5 files old enough to process for simulation {simu_name}")
             return
         
-        # 4. Process each particle
-        successful_count = 0
-        failed_count = 0
+        # 2. Read progress file to skip already-processed files
+        last_processed_time = self._read_progress_file(simu_name)
+        files_to_process = [
+            f for f in hdf5_files 
+            if self.hdf5_file_processor.get_hdf5_file_time_from_filename(f) > last_processed_time
+        ]
         
-        for particle_name in tqdm(all_particle_names, desc=f"Saving all particles in {simu_name}"):
+        if not files_to_process:
+            logger.info(f"No new HDF5 files to process for simulation {simu_name}")
+            logger.info(f"Last processed time: {last_processed_time}")
+            return
+        
+        logger.info(f"Found {len(files_to_process)} HDF5 files to process for simulation {simu_name}")
+        logger.info(f"Processing files from {files_to_process[0]} to {files_to_process[-1]}")
+        
+        # 3. Process HDF5 files one by one
+        files_processed_since_merge = 0
+        
+        for i, hdf5_file_path in enumerate(tqdm(files_to_process, desc=f"Processing HDF5 files in {simu_name}")):
             try:
-                particle_history_df = None
-                particle_history_df = self.update_one_particle_history_df(simu_name, particle_name, update=True)
+                # Read HDF5 file
+                df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
                 
-                if not particle_history_df.empty:
-                    successful_count += 1
-                else:
-                    logger.warning(f"Empty dataframe returned for particle {particle_name}")
-                    failed_count += 1
-                    
+                # Process all particles in this HDF5 file at once
+                _ = self.get_particle_df_from_hdf5_file(
+                    df_dict,
+                    particle_name='all',
+                    hdf5_file_path=hdf5_file_path,
+                    simu_name=simu_name,
+                    save_cache=True
+                )
+                
+                # Update progress file
+                hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
+                self._write_progress_file(simu_name, hdf5_time)
+                
+                files_processed_since_merge += 1
+                
+                # Periodically merge caches to avoid too many small files
+                if files_processed_since_merge >= merge_interval:
+                    logger.info(f"Processed {files_processed_since_merge} files, starting merge...")
+                    self._merge_and_cleanup_particle_cache(simu_name)
+                    files_processed_since_merge = 0
+                    gc.collect()
+                
             except Exception as e:
-                logger.error(f"Failed to process particle {particle_name}: {type(e).__name__}: {e}")
-                failed_count += 1
-            
-            finally:
-                gc.collect()
+                logger.error(f"Failed to process HDF5 file {hdf5_file_path}: {type(e).__name__}: {e}")
+                continue
         
-        logger.info(f"Completed saving particles in {simu_name}: {successful_count} successful, {failed_count} failed")
+        # Final merge of any remaining temporary files
+        if files_processed_since_merge > 0:
+            logger.info("Performing final merge of particle caches...")
+            self._merge_and_cleanup_particle_cache(simu_name)
+        
+        logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
     
     # Backward compatibility aliases
     def get_particle_df_all(self, simu_name: str, particle_name: int, 
