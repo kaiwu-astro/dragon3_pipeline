@@ -584,24 +584,74 @@ class ParticleTracker:
         else:
             return old_particle_history_df
 
-    @log_time(logger)
-    def update_multiple_particle_history_df(
-        self, simu_name: str, particle_names: Iterable[int], merge_interval: int = 3
+    def _accumulate_particle_df(
+        self, simu_name: str, particle_name: int, new_particle_df: pd.DataFrame
     ) -> None:
         """
-        Process specified particles in the simulation using HDF5-centric iteration
+        Merge new particle DataFrame with existing merged cache (if any) and save.
 
-        This method iterates through HDF5 files for efficiency:
-        1. Reads the progress file to skip already-processed files
-        2. For each unprocessed HDF5 file, extracts data for specified particles
-        3. Saves individual particle cache files
-        4. Periodically merges temporary cache files to avoid inode limits
-        5. Updates progress file after each HDF5 file
+        Args:
+            simu_name: Simulation name
+            particle_name: Particle name
+            new_particle_df: Newly accumulated DataFrame for this particle
+        """
+        if new_particle_df is None or new_particle_df.empty:
+            return
+
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        particle_dir = os.path.join(cache_base, str(particle_name))
+        os.makedirs(particle_dir, exist_ok=True)
+
+        merged_cache_files = sorted(
+            glob(os.path.join(particle_dir, f"{particle_name}_history_until_*.df.feather")),
+            reverse=True,
+        )
+
+        merged_df = new_particle_df
+        if merged_cache_files:
+            try:
+                old_df = pd.read_feather(merged_cache_files[0])
+                if not old_df.empty:
+                    merged_df = pd.concat([old_df, merged_df], ignore_index=True)
+            except Exception as e:
+                logger.warning(f"Failed to read merged cache {merged_cache_files[0]}: {e}")
+
+        if "TTOT" in merged_df.columns:
+            merged_df = (
+                merged_df.sort_values("TTOT")
+                .drop_duplicates(subset=["TTOT"], keep="last")
+                .reset_index(drop=True)
+            )
+            max_ttot = merged_df["TTOT"].max()
+        else:
+            max_ttot = 0.0
+
+        new_merged_file = os.path.join(
+            particle_dir, f"{particle_name}_history_until_{max_ttot:.2f}.df.feather"
+        )
+
+        try:
+            merged_df.to_feather(new_merged_file)
+            # Clean up old merged files
+            for old_file in merged_cache_files:
+                if old_file != new_merged_file:
+                    try:
+                        os.remove(old_file)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete old merged cache {old_file}: {e}")
+        except Exception as e:
+            logger.error(f"Failed to save merged cache for particle {particle_name}: {e}")
+
+    @log_time(logger)
+    def update_multiple_particle_history_df(
+        self, simu_name: str, particle_names: Iterable[int],
+    ) -> None:
+        """
+        Process specified particles in the simulation using HDF5-centric batch iteration.
 
         Args:
             simu_name: Name of the simulation
             particle_names: List-like of particle names (ints)
-            merge_interval: Number of HDF5 files to process before merging caches (default: 10)
         """
         particle_names = [int(p) for p in particle_names]
         if not particle_names:
@@ -629,69 +679,103 @@ class ParticleTracker:
         )
         logger.info(f"Processing files from {files_to_process[0]} to {files_to_process[-1]}")
 
-        # 3. Process HDF5 files one by one
-        files_processed_since_merge = 0
+        # 3. Estimate batch size based on memory cap
+        sample_path = files_to_process[0]
+        try:
+            sample_df_dict = self.hdf5_file_processor.read_file(sample_path, simu_name)
+        except Exception as e:
+            logger.error(f"Failed to read sample HDF5 file {sample_path}: {e}")
+            return
 
-        for i, hdf5_file_path in enumerate(
-            tqdm(files_to_process, desc=f"Processing HDF5 files in {simu_name}")
-        ):
-            try:
-                # Read HDF5 file
-                df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+        per_file_bytes = 0
+        for df in sample_df_dict.values():
+            if isinstance(df, pd.DataFrame):
+                per_file_bytes += int(df.memory_usage(deep=True).sum())
 
-                _ = self.get_particle_df_from_hdf5_file(
-                    df_dict,
-                    particle_name=particle_names,
-                    hdf5_file_path=hdf5_file_path,
-                    simu_name=simu_name,
-                    save_cache=True,
-                )
+        try:
+            total_mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        except Exception:
+            total_mem_bytes = 30 * 1024**3
 
-                # Update progress file
-                hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(
-                    hdf5_file_path
-                )
-                self._write_progress_file(simu_name, hdf5_time)
+        mem_cap_bytes = min(int(total_mem_bytes), 30 * 1024**3)
+        if per_file_bytes <= 0:
+            batch_size = 1
+        else:
+            batch_size = max(1, int(mem_cap_bytes // per_file_bytes))
 
-                files_processed_since_merge += 1
+        batch_size = min(batch_size, len(files_to_process))
+        logger.info(
+            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
+            f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
+            f"batch_size: {batch_size}"
+        )
 
-                # Periodically merge caches to avoid too many small files
-                if files_processed_since_merge >= merge_interval:
-                    logger.info(f"Processed {files_processed_since_merge} files, starting merge...")
-                    self._merge_and_cleanup_particle_cache(simu_name)
-                    files_processed_since_merge = 0
-                    gc.collect()
+        prefetched = {sample_path: sample_df_dict}
 
-            except Exception as e:
-                logger.error(
-                    f"Failed to process HDF5 file {hdf5_file_path}: {type(e).__name__}: {e}"
-                )
-                continue
+        # 4. Batch process HDF5 files
+        for start in range(0, len(files_to_process), batch_size):
+            batch_files = files_to_process[start : start + batch_size]
+            batch_particle_dfs: Dict[int, list] = {}
 
-        # Final merge of any remaining temporary files
-        if files_processed_since_merge > 0:
-            logger.info("Performing final merge of particle caches...")
-            self._merge_and_cleanup_particle_cache(simu_name)
+            for hdf5_file_path in tqdm(
+                batch_files, desc=f"Processing HDF5 batch in {simu_name}"
+            ):
+                try:
+                    df_dict = prefetched.pop(hdf5_file_path, None)
+                    if df_dict is None:
+                        df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+
+                    result_dict = self.get_particle_df_from_hdf5_file(
+                        df_dict,
+                        particle_name=particle_names,
+                        hdf5_file_path=hdf5_file_path,
+                        simu_name=simu_name,
+                        save_cache=False,
+                    )
+
+                    for pname, pdf in result_dict.items():
+                        if pdf is not None and not pdf.empty:
+                            batch_particle_dfs.setdefault(int(pname), []).append(pdf)
+
+                except Exception as e:
+                    logger.error(
+                        f"Failed to process HDF5 file {hdf5_file_path}: {type(e).__name__}: {e}"
+                    )
+                    continue
+
+            # 5. Accumulate and persist per particle
+            ctx = multiprocessing.get_context("forkserver")
+            tasks = [
+                (simu_name, int(pname), pd.concat(dfs, ignore_index=True))
+                for pname, dfs in batch_particle_dfs.items()
+                if dfs
+            ]
+
+            if tasks:
+                with ctx.Pool(
+                    processes=self.config.processes_count,
+                    maxtasksperchild=self.config.tasks_per_child,
+                ) as pool:
+                    pool.starmap(self._accumulate_particle_df, tasks)
+
+            # 6. Update progress file
+            last_hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(
+                batch_files[-1]
+            )
+            self._write_progress_file(simu_name, last_hdf5_time)
 
         logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
 
-    # Backward compatibility aliases
-    def get_particle_df_all(
-        self, simu_name: str, particle_name: int, update: bool = True
-    ) -> pd.DataFrame:
+    def save_every_particle_df_of_sim(self, simu_name: str, ) -> None:
         """
-        Backward compatibility alias for update_one_particle_history_df
-
-        .. deprecated:: 0.2.0
-            Use :meth:`update_one_particle_history_df` instead.
+        Call update_multiple_particle_history_df, process for all particles.
+        CAUTION: this is likely to drain you disk INODE. Only use for small star clusters.
+        Args:
+            simu_name: Name of the simulation
         """
-        return self.update_one_particle_history_df(simu_name, particle_name, update)
-
-    def save_every_particle_df_of_sim(self, simu_name: str, particle_names: Iterable[int]) -> None:
-        """
-        Backward compatibility alias for update_multiple_particle_history_df
-
-        .. deprecated:: 0.2.0
-            Use :meth:`update_multiple_particle_history_df` instead.
-        """
+        # get all particle names from the first hdf5 file
+        first_hdf5_path = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)[0]
+        df_dict = self.hdf5_file_processor.read_file(first_hdf5_path, simu_name)
+        single_df_all = df_dict["singles"]
+        particle_names = single_df_all["Name"].unique().tolist()
         return self.update_multiple_particle_history_df(simu_name, particle_names)
