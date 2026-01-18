@@ -80,11 +80,16 @@ class ParticleTracker:
             return {}
 
         result_dict = {}
+        _proc = multiprocessing.current_process()
+        _in_mp = _proc.name != "MainProcess"
+        _pos = (_proc._identity[0] - 1) if _in_mp and _proc._identity else 0
+        _tqdm_kwargs = {"desc": f"Getting particle df from {os.path.basename(hdf5_file_path)}"}
+        if _in_mp:
+            _tqdm_kwargs.update({"position": _pos, "leave": False})
+
         for pname in tqdm(
             particle_names,
-            desc=(
-                f"Getting particle df from {os.path.basename(hdf5_file_path)}"
-            ),
+            **_tqdm_kwargs,
         ):
             particle_df = self._get_single_particle_df(df_dict, int(pname))
             if save_cache and not particle_df.empty:
