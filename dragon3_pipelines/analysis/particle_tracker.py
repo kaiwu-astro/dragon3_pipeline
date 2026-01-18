@@ -83,7 +83,7 @@ class ParticleTracker:
         for pname in tqdm(
             particle_names,
             desc=(
-                f"Writing cache for particles in {os.path.basename(hdf5_file_path)}"
+                f"Getting particle df from {os.path.basename(hdf5_file_path)}"
             ),
         ):
             particle_df = self._get_single_particle_df(df_dict, int(pname))
@@ -756,8 +756,13 @@ class ParticleTracker:
                     processes=self.config.processes_count,
                     maxtasksperchild=self.config.tasks_per_child,
                 ) as pool:
-                    pool.starmap(self._accumulate_particle_df, tasks)
-
+                    iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
+                    for _ in tqdm(
+                        iterator,
+                        total=len(tasks),
+                        desc=f"Accumulating particle caches in {simu_name}",
+                    ):
+                        pass
             # 6. Update progress file
             last_hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(
                 batch_files[-1]
@@ -779,3 +784,13 @@ class ParticleTracker:
         single_df_all = df_dict["singles"]
         particle_names = single_df_all["Name"].unique().tolist()
         return self.update_multiple_particle_history_df(simu_name, particle_names)
+
+    def _get_single_particle_df_mp(
+        self, args: Tuple[Dict[str, pd.DataFrame], int]
+    ) -> Tuple[int, pd.DataFrame]:
+        df_dict, particle_name = args
+        return particle_name, self._get_single_particle_df(df_dict, particle_name)
+
+    def _accumulate_particle_df_mp(self, args: Tuple[str, int, pd.DataFrame]) -> None:
+        simu_name, particle_name, new_particle_df = args
+        self._accumulate_particle_df(simu_name, particle_name, new_particle_df)
