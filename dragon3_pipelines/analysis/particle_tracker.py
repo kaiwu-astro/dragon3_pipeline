@@ -692,12 +692,14 @@ class ParticleTracker:
             if isinstance(df, pd.DataFrame):
                 per_file_bytes += int(df.memory_usage(deep=True).sum())
 
+        USE_MEM_MAX_GB = 40.0 # jwb mem limit on login node per user
+
         try:
             total_mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         except Exception:
-            total_mem_bytes = 30 * 1024**3
+            total_mem_bytes = USE_MEM_MAX_GB * 1024**3
 
-        mem_cap_bytes = min(int(total_mem_bytes), 30 * 1024**3)
+        mem_cap_bytes = min(int(total_mem_bytes), USE_MEM_MAX_GB * 1024**3) / 2 # /2 due to data will double when extracting particle_df
         if per_file_bytes <= 0:
             batch_size = 1
         else:
@@ -717,31 +719,19 @@ class ParticleTracker:
             batch_files = files_to_process[start : start + batch_size]
             batch_particle_dfs: Dict[int, list] = {}
 
-            for hdf5_file_path in tqdm(
-                batch_files, desc=f"Processing HDF5 batch in {simu_name}"
-            ):
-                try:
-                    df_dict = prefetched.pop(hdf5_file_path, None)
-                    if df_dict is None:
-                        df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+            ctx = multiprocessing.get_context("forkserver")
+            tasks = [(fpath, simu_name, particle_names) for fpath in batch_files]
 
-                    result_dict = self.get_particle_df_from_hdf5_file(
-                        df_dict,
-                        particle_name=particle_names,
-                        hdf5_file_path=hdf5_file_path,
-                        simu_name=simu_name,
-                        save_cache=False,
-                    )
-
+            with ctx.Pool(processes=batch_size, maxtasksperchild=self.config.tasks_per_child) as pool:
+                iterator = pool.imap(self._process_single_hdf5_for_particles_mp, tasks)
+                for _, result_dict in tqdm(
+                    iterator, total=len(tasks), desc=f"Processing HDF5 batch in {simu_name}"
+                ):
+                    if not result_dict:
+                        continue
                     for pname, pdf in result_dict.items():
                         if pdf is not None and not pdf.empty:
                             batch_particle_dfs.setdefault(int(pname), []).append(pdf)
-
-                except Exception as e:
-                    logger.error(
-                        f"Failed to process HDF5 file {hdf5_file_path}: {type(e).__name__}: {e}"
-                    )
-                    continue
 
             # 5. Accumulate and persist per particle
             ctx = multiprocessing.get_context("forkserver")
@@ -794,3 +784,23 @@ class ParticleTracker:
     def _accumulate_particle_df_mp(self, args: Tuple[str, int, pd.DataFrame]) -> None:
         simu_name, particle_name, new_particle_df = args
         self._accumulate_particle_df(simu_name, particle_name, new_particle_df)
+
+    def _process_single_hdf5_for_particles_mp(
+        self, args: Tuple[str, str, Iterable[int]]
+    ) -> Tuple[str, Dict[int, pd.DataFrame]]:
+        hdf5_file_path, simu_name, particle_names = args
+        try:
+            df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+            result_dict = self.get_particle_df_from_hdf5_file(
+                df_dict,
+                particle_name=particle_names,
+                hdf5_file_path=hdf5_file_path,
+                simu_name=simu_name,
+                save_cache=False,
+            )
+            return hdf5_file_path, result_dict
+        except Exception as e:
+            logger.error(
+                f"Failed to process HDF5 file {hdf5_file_path}: {type(e).__name__}: {e}"
+            )
+            return hdf5_file_path, {}
