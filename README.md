@@ -125,7 +125,7 @@ from dragon3_pipelines.config import ConfigManager
 
 config = ConfigManager()
 tracker = ParticleTracker(config)
-particle_history = tracker.get_particle_df_all(simu_name="my_sim", particle_name=12345)
+particle_history = tracker.update_one_particle_history_df(simu_name="my_sim", particle_name=12345)
 ```
 
 ### Create Visualizations

@@ -51,7 +51,7 @@ df_singles, df_binaries = processor.get_hdf5_dataframes()
 
 # Track particles
 tracker = ParticleTracker(config, "my_simulation")
-history = tracker.get_particle_df_all(particle_id=12345)
+history = tracker.update_one_particle_history_df(simu_name='my_sim', particle_id=12345)
 
 # Create visualizations
 viz = SingleStarVisualizer(processor, config)

@@ -188,21 +188,21 @@ class TestParticleTracker:
 
     @patch("dragon3_pipelines.analysis.particle_tracker.glob")
     @patch("os.path.exists")
-    def test_get_particle_df_all_no_cache(
+    def test_update_one_particle_history_df_no_cache(
         self, mock_exists, mock_glob, particle_tracker, mock_config
     ):
         """Test getting particle data with no existing cache"""
         mock_exists.return_value = False
         mock_glob.return_value = []
 
-        result = particle_tracker.get_particle_df_all("test_simu", 1000, update=False)
+        result = particle_tracker.update_one_particle_history_df("test_simu", 1000, update=False)
 
         assert result.empty
 
     @patch("dragon3_pipelines.analysis.particle_tracker.glob")
     @patch("pandas.read_feather")
     @patch("os.path.exists")
-    def test_get_particle_df_all_with_cache(
+    def test_update_one_particle_history_df_with_cache(
         self, mock_exists, mock_read_feather, mock_glob, particle_tracker
     ):
         """Test getting particle data with existing cache"""
@@ -219,7 +219,7 @@ class TestParticleTracker:
         # Mock glob to return a merged cache file path
         mock_glob.return_value = ["/fake/cache/1000/1000_history_until_5.00.df.feather"]
 
-        result = particle_tracker.get_particle_df_all("test_simu", 1000, update=False)
+        result = particle_tracker.update_one_particle_history_df("test_simu", 1000, update=False)
 
         assert len(result) == 1
         assert result["Name"].iloc[0] == 1000
