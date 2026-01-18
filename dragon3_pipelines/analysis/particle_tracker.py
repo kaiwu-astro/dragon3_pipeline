@@ -78,7 +78,7 @@ class ParticleTracker:
         if particle_name == "all":
             if "singles" not in df_dict or "Name" not in df_dict["singles"].columns:
                 raise ValueError("df_dict must contain 'singles' DataFrame with 'Name' column when using particle_name='all'")
-            particle_names = df_dict["singles"]["Name"].unique().tolist()
+            particle_names = [int(name) for name in df_dict["singles"]["Name"].unique()]
         else:
             try:
                 particle_names = [int(p) for p in particle_name]  # list-like
