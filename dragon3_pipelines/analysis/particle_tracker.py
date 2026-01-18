@@ -39,7 +39,7 @@ class ParticleTracker:
     def get_particle_df_from_hdf5_file(
         self,
         df_dict: Optional[Dict[str, pd.DataFrame]] = None,
-        particle_name: Union[int, Iterable[int]] = "all",
+        particle_name: Union[int, Iterable[int], str] = "all",
         hdf5_file_path: Optional[str] = None,
         simu_name: Optional[str] = None,
         save_cache: bool = False,
@@ -50,14 +50,17 @@ class ParticleTracker:
         Args:
             df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames
                     (obtained from HDF5FileProcessor.read_file)
-            particle_name: Particle Name to track (int) or list-like of ints
+            particle_name: Particle Name to track. Can be:
+                - int: track a single particle
+                - list-like of ints: track multiple specific particles
+                - "all": track all particles found in df_dict
             hdf5_file_path: Path to HDF5 file (required when df_dict is None or save_cache=True)
             simu_name: Simulation name (required when df_dict is None or save_cache=True)
             save_cache: If True, save individual particle DataFrames to cache files
 
         Returns:
             If particle_name is int: DataFrame containing all time points for this particle
-            If particle_name is list-like: Dict mapping particle_name -> DataFrame
+            If particle_name is "all" or list-like: Dict mapping particle_name -> DataFrame
         """
         if isinstance(particle_name, (int, np.integer)):
             assert df_dict is not None, "df_dict is required for single-particle mode"
@@ -71,10 +74,14 @@ class ParticleTracker:
         if save_cache and (hdf5_file_path is None or simu_name is None):
             raise ValueError("hdf5_file_path and simu_name are required when save_cache=True")
 
-        try:
-            particle_names = [int(p) for p in particle_name]  # list-like
-        except TypeError:
-            raise ValueError("particle_name must be int or list-like of ints")
+        # Handle special case: particle_name == "all" means process all particles
+        if particle_name == "all":
+            particle_names = df_dict["singles"]["Name"].unique().tolist()
+        else:
+            try:
+                particle_names = [int(p) for p in particle_name]  # list-like
+            except TypeError:
+                raise ValueError("particle_name must be int or list-like of ints")
 
         if not particle_names:
             return {}
@@ -83,7 +90,10 @@ class ParticleTracker:
         _proc = multiprocessing.current_process()
         _in_mp = _proc.name != "MainProcess"
         _pos = (_proc._identity[0] - 1) if _in_mp and _proc._identity else 0
-        _tqdm_kwargs = {"desc": f"Getting particle df from {os.path.basename(hdf5_file_path)}"}
+        if hdf5_file_path is not None:
+            _tqdm_kwargs = {"desc": f"Getting particle df from {os.path.basename(hdf5_file_path)}"}
+        else:
+            _tqdm_kwargs = {"desc": "Getting particle df"}
         if _in_mp:
             _tqdm_kwargs.update({"position": _pos, "leave": False})
 
