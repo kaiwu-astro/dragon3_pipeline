@@ -216,7 +216,8 @@ class TestParticleTracker:
 
         mock_exists.return_value = True
         mock_read_feather.return_value = cached_df
-        mock_glob.return_value = []
+        # Mock glob to return a merged cache file path
+        mock_glob.return_value = ["/fake/cache/1000/1000_history_until_5.00.df.feather"]
 
         result = particle_tracker.get_particle_df_all("test_simu", 1000, update=False)
 
@@ -225,7 +226,13 @@ class TestParticleTracker:
 
     def test_get_particle_df_from_hdf5_file_all_particles(self, particle_tracker, sample_df_dict):
         """Test processing all particles from HDF5 file"""
-        result = particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, "all")
+        # Mock the HDF5 file processor to return sample data
+        with patch.object(
+            particle_tracker.hdf5_file_processor,
+            "read_file",
+            return_value=sample_df_dict,
+        ):
+            result = particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, "all")
 
         # Should return a dict
         assert isinstance(result, dict)
@@ -243,8 +250,12 @@ class TestParticleTracker:
         # Update config to use temp directory
         mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
 
-        # Mock the HDF5 file processor to return a fake time
+        # Mock the HDF5 file processor to return sample data and a fake time
         with patch.object(
+            particle_tracker.hdf5_file_processor,
+            "read_file",
+            return_value=sample_df_dict,
+        ), patch.object(
             particle_tracker.hdf5_file_processor,
             "get_hdf5_file_time_from_filename",
             return_value=1.5,
