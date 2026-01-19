@@ -26,9 +26,6 @@ pip install -e ".[dev]"
 # Run analysis pipeline
 python -m dragon3_pipelines
 
-# Or use the legacy interface
-python plot_nbody.py --skip-until=100
-
 # Generate movies
 bash dragon3_jpg_to_movie.sh
 ```

@@ -14,14 +14,14 @@ from dragon3_pipelines.visualization.lagrangian import LagrVisualizer
 from dragon3_pipelines.visualization.collision import CollCoalVisualizer
 
 __all__ = [
-    'BaseVisualizer',
-    'BaseHDF5Visualizer',
-    'HDF5Visualizer',
-    'BaseContinousFileVisualizer',
-    'SingleStarVisualizer',
-    'BinaryStarVisualizer',
-    'LagrVisualizer',
-    'CollCoalVisualizer',
-    'set_mpl_fonts',
-    'add_grid',
+    "BaseVisualizer",
+    "BaseHDF5Visualizer",
+    "HDF5Visualizer",
+    "BaseContinousFileVisualizer",
+    "SingleStarVisualizer",
+    "BinaryStarVisualizer",
+    "LagrVisualizer",
+    "CollCoalVisualizer",
+    "set_mpl_fonts",
+    "add_grid",
 ]

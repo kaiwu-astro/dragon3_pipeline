@@ -4,6 +4,6 @@ from dragon3_pipelines.analysis.particle_tracker import ParticleTracker
 from dragon3_pipelines.analysis.physics import tau_gw
 
 __all__ = [
-    'ParticleTracker',
-    'tau_gw',
+    "ParticleTracker",
+    "tau_gw",
 ]

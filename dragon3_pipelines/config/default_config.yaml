@@ -36,6 +36,8 @@ processing:
   close_figure_in_ipython: false
   processes_count: 40
   tasks_per_child: 3
+  mem_max_gb: 40.0
+  inode_limit: 2000000
 
 # Lagrangian radii percentages to plot
 selected_lagr_percent:
