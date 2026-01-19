@@ -469,15 +469,27 @@ class ParticleTracker:
             return old_particle_history_df
 
     def _accumulate_particle_df(
-        self, simu_name: str, particle_name: int, new_particle_df: pd.DataFrame
+        self, 
+        simu_name: str, 
+        particle_name: int, 
+        new_particle_df: pd.DataFrame,
+        t_start: float,
+        t_end: float,
+        n_cache_tol: int
     ) -> None:
         """
-        Merge new particle DataFrame with existing merged cache (if any) and save.
+        Accumulate particle DataFrame using inode-based merge strategy.
+        
+        If cache file count < n_cache_tol: write individual feather file
+        If cache file count >= n_cache_tol: merge all files and cleanup
 
         Args:
             simu_name: Simulation name
             particle_name: Particle name
             new_particle_df: Newly accumulated DataFrame for this particle
+            t_start: Start time of the batch being processed
+            t_end: End time of the batch being processed
+            n_cache_tol: Threshold for number of cache files before merging
         """
         if new_particle_df is None or new_particle_df.empty:
             return
@@ -486,49 +498,106 @@ class ParticleTracker:
         particle_dir = os.path.join(cache_base, str(particle_name))
         os.makedirs(particle_dir, exist_ok=True)
 
+        # Count existing cache files (exclude _history_until_ files)
+        individual_cache_files = glob(
+            os.path.join(particle_dir, f"{particle_name}_df_*.df.feather")
+        )
         merged_cache_files = sorted(
             glob(os.path.join(particle_dir, f"{particle_name}_history_until_*.df.feather")),
             reverse=True,
         )
-
-        merged_df = new_particle_df
-        if merged_cache_files:
-            try:
-                old_df = pd.read_feather(merged_cache_files[0])
-                if not old_df.empty:
-                    merged_df = pd.concat([old_df, merged_df], ignore_index=True)
-            except Exception as e:
-                logger.warning(f"Failed to read merged cache {merged_cache_files[0]}: {e}")
-
-        if "TTOT" in merged_df.columns:
-            merged_df = (
-                merged_df.sort_values("TTOT")
-                .drop_duplicates(subset=["TTOT"], keep="last")
-                .reset_index(drop=True)
+        
+        cache_file_count = len(individual_cache_files)
+        
+        if cache_file_count < n_cache_tol:
+            # Strategy 1: Just append a new feather file
+            new_cache_file = os.path.join(
+                particle_dir, f"{particle_name}_df_{t_start:.6f}_to_{t_end:.6f}.df.feather"
             )
-            max_ttot = merged_df["TTOT"].max()
+            try:
+                new_particle_df.to_feather(new_cache_file)
+                logger.debug(
+                    f"Saved individual cache for particle {particle_name}: {new_cache_file} "
+                    f"(count: {cache_file_count + 1}/{n_cache_tol})"
+                )
+            except Exception as e:
+                logger.error(f"Failed to save individual cache for particle {particle_name}: {e}")
         else:
-            max_ttot = 0.0
-
-        new_merged_file = os.path.join(
-            particle_dir, f"{particle_name}_history_until_{max_ttot:.2f}.df.feather"
-        )
-
-        try:
-            merged_df.to_feather(new_merged_file)
-            # Clean up old merged files
-            for old_file in merged_cache_files:
-                if old_file != new_merged_file:
-                    try:
-                        os.remove(old_file)
-                    except Exception as e:
-                        logger.warning(f"Failed to delete old merged cache {old_file}: {e}")
-        except Exception as e:
-            logger.error(f"Failed to save merged cache for particle {particle_name}: {e}")
+            # Strategy 2: Merge all caches
+            logger.info(
+                f"Cache file count ({cache_file_count}) >= threshold ({n_cache_tol}) "
+                f"for particle {particle_name}. Triggering merge."
+            )
+            
+            # Collect all DataFrames to merge
+            dfs_to_merge = [new_particle_df]
+            
+            # Read all individual cache files
+            for cache_file in individual_cache_files:
+                try:
+                    df = pd.read_feather(cache_file)
+                    if not df.empty:
+                        dfs_to_merge.append(df)
+                except Exception as e:
+                    logger.warning(f"Failed to read cache file {cache_file}: {e}")
+            
+            # Read existing merged file if present
+            if merged_cache_files:
+                try:
+                    old_merged_df = pd.read_feather(merged_cache_files[0])
+                    if not old_merged_df.empty:
+                        dfs_to_merge.append(old_merged_df)
+                except Exception as e:
+                    logger.warning(f"Failed to read merged cache {merged_cache_files[0]}: {e}")
+            
+            # Merge all DataFrames
+            if dfs_to_merge:
+                merged_df = pd.concat(dfs_to_merge, ignore_index=True)
+                
+                # Sort, deduplicate
+                if "TTOT" in merged_df.columns:
+                    merged_df = (
+                        merged_df.sort_values("TTOT")
+                        .drop_duplicates(subset=["TTOT"], keep="last")
+                        .reset_index(drop=True)
+                    )
+                    max_ttot = merged_df["TTOT"].max()
+                else:
+                    max_ttot = 0.0
+                
+                # Save merged file
+                new_merged_file = os.path.join(
+                    particle_dir, f"{particle_name}_history_until_{max_ttot:.2f}.df.feather"
+                )
+                
+                try:
+                    merged_df.to_feather(new_merged_file)
+                    logger.info(
+                        f"Merged {len(dfs_to_merge)} caches for particle {particle_name} "
+                        f"into {new_merged_file}"
+                    )
+                    
+                    # Clean up individual cache files
+                    for cache_file in individual_cache_files:
+                        try:
+                            os.remove(cache_file)
+                        except Exception as e:
+                            logger.warning(f"Failed to delete cache file {cache_file}: {e}")
+                    
+                    # Clean up old merged files
+                    for old_file in merged_cache_files:
+                        if old_file != new_merged_file:
+                            try:
+                                os.remove(old_file)
+                            except Exception as e:
+                                logger.warning(f"Failed to delete old merged cache {old_file}: {e}")
+                                
+                except Exception as e:
+                    logger.error(f"Failed to save merged cache for particle {particle_name}: {e}")
 
     @log_time(logger)
     def update_multiple_particle_history_df(
-        self, simu_name: str, particle_names: Iterable[int],
+        self, simu_name: str, particle_names: Iterable[int], n_cache_tol: Optional[int] = None
     ) -> None:
         """
         Process specified particles in the simulation using HDF5-centric batch iteration.
@@ -536,11 +605,18 @@ class ParticleTracker:
         Args:
             simu_name: Name of the simulation
             particle_names: List-like of particle names (ints)
+            n_cache_tol: Maximum number of cache files before triggering merge.
+                        If None, calculates as inode_limit // len(particle_names) - 5
         """
         particle_names = [int(p) for p in particle_names]
         if not particle_names:
             logger.info("No particle_names provided, nothing to process")
             return
+        
+        # Calculate n_cache_tol if not provided
+        if n_cache_tol is None:
+            n_cache_tol = self.config.inode_limit // len(particle_names) - 5
+            logger.info(f"Calculated n_cache_tol = {n_cache_tol} from inode_limit and particle count")
 
         # 1. Get all HDF5 files
         hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
@@ -576,14 +652,7 @@ class ParticleTracker:
             if isinstance(df, pd.DataFrame):
                 per_file_bytes += int(df.memory_usage(deep=True).sum())
 
-        USE_MEM_MAX_GB = 40.0 # jwb mem limit on login node per user
-
-        try:
-            total_mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-        except Exception:
-            total_mem_bytes = USE_MEM_MAX_GB * 1024**3
-
-        mem_cap_bytes = min(int(total_mem_bytes), USE_MEM_MAX_GB * 1024**3) / 2 # /2 due to data will double when extracting particle_df
+        mem_cap_bytes = self.config.mem_cap_bytes
         if per_file_bytes <= 0:
             batch_size = 1
         else:
@@ -622,9 +691,13 @@ class ParticleTracker:
                             batch_particle_dfs.setdefault(int(pname), []).append(pdf)
 
             # 5. Accumulate and persist per particle
+            # Get time range for this batch
+            t_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[0])
+            t_end = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[-1])
+            
             ctx = multiprocessing.get_context("forkserver")
             tasks = [
-                (simu_name, int(pname), pd.concat(dfs, ignore_index=True))
+                (simu_name, int(pname), pd.concat(dfs, ignore_index=True), t_start, t_end, n_cache_tol)
                 for pname, dfs in batch_particle_dfs.items()
                 if dfs
             ]
@@ -669,9 +742,11 @@ class ParticleTracker:
         df_dict, particle_name = args
         return particle_name, self._get_single_particle_df(df_dict, particle_name)
 
-    def _accumulate_particle_df_mp(self, args: Tuple[str, int, pd.DataFrame]) -> None:
-        simu_name, particle_name, new_particle_df = args
-        self._accumulate_particle_df(simu_name, particle_name, new_particle_df)
+    def _accumulate_particle_df_mp(
+        self, args: Tuple[str, int, pd.DataFrame, float, float, int]
+    ) -> None:
+        simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol = args
+        self._accumulate_particle_df(simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol)
 
     def _process_single_hdf5_for_particles_mp(
         self, args: Tuple[str, str, Iterable[int]]
