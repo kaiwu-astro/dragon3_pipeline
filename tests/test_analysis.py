@@ -21,6 +21,8 @@ class TestParticleTracker:
         config.pathof = {"test_simu": "/path/to/test"}
         config.processes_count = 2
         config.tasks_per_child = 10
+        config.mem_cap_bytes = 40 * 1024**3 // 2  # 20 GB
+        config.inode_limit = 2000000
         return config
 
     @pytest.fixture
@@ -251,14 +253,17 @@ class TestParticleTracker:
         mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
 
         # Mock the HDF5 file processor to return sample data and a fake time
-        with patch.object(
-            particle_tracker.hdf5_file_processor,
-            "read_file",
-            return_value=sample_df_dict,
-        ), patch.object(
-            particle_tracker.hdf5_file_processor,
-            "get_hdf5_file_time_from_filename",
-            return_value=1.5,
+        with (
+            patch.object(
+                particle_tracker.hdf5_file_processor,
+                "read_file",
+                return_value=sample_df_dict,
+            ),
+            patch.object(
+                particle_tracker.hdf5_file_processor,
+                "get_hdf5_file_time_from_filename",
+                return_value=1.5,
+            ),
         ):
             result = particle_tracker.get_particle_df_from_hdf5_file(
                 sample_df_dict,
@@ -307,69 +312,6 @@ class TestParticleTracker:
         progress = particle_tracker._read_progress_file("test_simu")
         assert progress == 456.78
 
-    def test_merge_and_cleanup_particle_cache(self, particle_tracker, mock_config, tmp_path):
-        """Test merging and cleanup of particle cache files"""
-        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
-
-        # Create some temporary cache files for particle 1000
-        particle_dir = tmp_path / "1000"
-        particle_dir.mkdir()
-
-        # Create temporary cache files
-        df1 = pd.DataFrame({"Name": [1000], "TTOT": [1.0], "M": [10.0]})
-        df2 = pd.DataFrame({"Name": [1000], "TTOT": [2.0], "M": [9.5]})
-        df3 = pd.DataFrame({"Name": [1000], "TTOT": [3.0], "M": [9.0]})
-
-        df1.to_feather(particle_dir / "1.000000.1000.df.feather")
-        df2.to_feather(particle_dir / "2.000000.1000.df.feather")
-        df3.to_feather(particle_dir / "3.000000.1000.df.feather")
-
-        # Run merge
-        particle_tracker._merge_and_cleanup_particle_cache("test_simu")
-
-        # Check that merged file exists
-        merged_files = list(particle_dir.glob("1000_history_until_*.df.feather"))
-        assert len(merged_files) == 1
-
-        # Check merged file content
-        merged_df = pd.read_feather(merged_files[0])
-        assert len(merged_df) == 3
-        assert list(merged_df["TTOT"]) == [1.0, 2.0, 3.0]
-
-        # Check that temporary files were deleted
-        temp_files = list(particle_dir.glob("*.000000.1000.df.feather"))
-        assert len(temp_files) == 0
-
-    def test_merge_with_existing_merged_file(self, particle_tracker, mock_config, tmp_path):
-        """Test merging when an old merged file already exists"""
-        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
-
-        particle_dir = tmp_path / "2000"
-        particle_dir.mkdir()
-
-        # Create an existing merged file
-        old_df = pd.DataFrame({"Name": [2000], "TTOT": [0.5], "M": [15.0]})
-        old_df.to_feather(particle_dir / "2000_history_until_0.50.df.feather")
-
-        # Create new temporary files
-        new_df = pd.DataFrame({"Name": [2000], "TTOT": [1.5], "M": [14.5]})
-        new_df.to_feather(particle_dir / "1.500000.2000.df.feather")
-
-        # Run merge
-        particle_tracker._merge_and_cleanup_particle_cache("test_simu")
-
-        # Should have one merged file
-        merged_files = list(particle_dir.glob("2000_history_until_*.df.feather"))
-        assert len(merged_files) == 1
-
-        # Should contain both old and new data
-        merged_df = pd.read_feather(merged_files[0])
-        assert len(merged_df) == 2
-        assert set(merged_df["TTOT"]) == {0.5, 1.5}
-
-        # Old merged file should be deleted
-        assert not (particle_dir / "2000_history_until_0.50.df.feather").exists()
-
     def test_update_one_particle_reads_merged_cache(self, particle_tracker, mock_config, tmp_path):
         """Test that update_one_particle_history_df prioritizes merged cache format"""
         mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
@@ -393,6 +335,99 @@ class TestParticleTracker:
         assert len(result) == 2
         assert list(result["TTOT"]) == [1.0, 2.0]
         assert list(result["Name"]) == [3000, 3000]
+
+    def test_accumulate_particle_df_below_threshold(self, particle_tracker, mock_config, tmp_path):
+        """Test that accumulate writes individual files when below threshold"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        particle_dir = tmp_path / "4000"
+        particle_dir.mkdir()
+
+        # Create test DataFrame
+        new_df = pd.DataFrame({"Name": [4000], "TTOT": [1.0], "M": [10.0]})
+
+        # Call accumulate with high threshold (should write individual file)
+        particle_tracker._accumulate_particle_df(
+            "test_simu", 4000, new_df, t_start=1.0, t_end=2.0, n_cache_tol=100
+        )
+
+        # Check that individual file was created
+        individual_files = list(particle_dir.glob("4000_df_*.df.feather"))
+        assert len(individual_files) == 1
+
+        # Check no merged file exists
+        merged_files = list(particle_dir.glob("4000_history_until_*.df.feather"))
+        assert len(merged_files) == 0
+
+    def test_accumulate_particle_df_above_threshold(self, particle_tracker, mock_config, tmp_path):
+        """Test that accumulate merges files when above threshold"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        particle_dir = tmp_path / "5000"
+        particle_dir.mkdir()
+
+        # Create multiple individual cache files to exceed threshold
+        for i in range(3):
+            df = pd.DataFrame({"Name": [5000], "TTOT": [float(i)], "M": [10.0 - i * 0.1]})
+            df.to_feather(particle_dir / f"5000_df_{i}.000000_to_{i+1}.000000.df.feather")
+
+        # Add new data with threshold = 3 (should trigger merge)
+        new_df = pd.DataFrame({"Name": [5000], "TTOT": [3.0], "M": [9.7]})
+
+        particle_tracker._accumulate_particle_df(
+            "test_simu", 5000, new_df, t_start=3.0, t_end=4.0, n_cache_tol=3
+        )
+
+        # Check that merged file was created
+        merged_files = list(particle_dir.glob("5000_history_until_*.df.feather"))
+        assert len(merged_files) == 1
+
+        # Check that individual files were cleaned up
+        individual_files = list(particle_dir.glob("5000_df_*.df.feather"))
+        assert len(individual_files) == 0
+
+        # Check merged content
+        merged_df = pd.read_feather(merged_files[0])
+        assert len(merged_df) == 4  # 3 old + 1 new
+        assert sorted(merged_df["TTOT"].tolist()) == [0.0, 1.0, 2.0, 3.0]
+
+    def test_accumulate_particle_df_merge_with_existing(
+        self, particle_tracker, mock_config, tmp_path
+    ):
+        """Test merging when old merged file exists"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        particle_dir = tmp_path / "6000"
+        particle_dir.mkdir()
+
+        # Create existing merged file
+        old_merged_df = pd.DataFrame({"Name": [6000, 6000], "TTOT": [0.0, 1.0], "M": [10.0, 9.9]})
+        old_merged_df.to_feather(particle_dir / "6000_history_until_1.00.df.feather")
+
+        # Create individual files that exceed threshold
+        for i in range(3):
+            df = pd.DataFrame({"Name": [6000], "TTOT": [2.0 + i], "M": [9.8 - i * 0.1]})
+            df.to_feather(particle_dir / f"6000_df_{2+i}.000000_to_{3+i}.000000.df.feather")
+
+        # Add new data with low threshold (trigger merge)
+        new_df = pd.DataFrame({"Name": [6000], "TTOT": [5.0], "M": [9.5]})
+
+        particle_tracker._accumulate_particle_df(
+            "test_simu", 6000, new_df, t_start=5.0, t_end=6.0, n_cache_tol=2
+        )
+
+        # Should have one new merged file
+        merged_files = list(particle_dir.glob("6000_history_until_*.df.feather"))
+        assert len(merged_files) == 1
+
+        # Old merged file should be deleted
+        assert not (particle_dir / "6000_history_until_1.00.df.feather").exists()
+
+        # Check merged content includes old and new data
+        merged_df = pd.read_feather(merged_files[0])
+        assert len(merged_df) == 6  # 2 old merged + 3 individual + 1 new
+        assert merged_df["TTOT"].min() == 0.0
+        assert merged_df["TTOT"].max() == 5.0
 
 
 class TestPhysics:

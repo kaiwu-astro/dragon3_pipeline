@@ -3,6 +3,6 @@
 from dragon3_pipelines.config.settings import ConfigManager, load_config
 
 __all__ = [
-    'ConfigManager',
-    'load_config',
+    "ConfigManager",
+    "load_config",
 ]
