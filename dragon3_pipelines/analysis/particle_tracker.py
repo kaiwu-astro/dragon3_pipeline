@@ -732,7 +732,11 @@ class ParticleTracker:
         prefetched = {sample_path: sample_df_dict}
 
         # 4. Batch process HDF5 files
-        for start in range(0, len(files_to_process), batch_size):
+        for start in tqdm(
+            range(0, len(files_to_process), batch_size),
+            total=len(files_to_process),
+            desc=f"Processing all HDF5 files in {simu_name}",
+        ):
             batch_files = files_to_process[start : start + batch_size]
             batch_particle_dfs: Dict[int, list] = {}
 
