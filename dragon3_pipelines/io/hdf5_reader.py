@@ -507,13 +507,14 @@ class HDF5FileProcessor:
             logger.debug(f"No hierarchical triples found at ttot={ttot}")
             return pd.DataFrame()
 
-    def get_all_hdf5_paths(self, simu_name: str, wait_age_hour: int = 24) -> List[str]:
+    def get_all_hdf5_paths(self, simu_name: str, wait_age_hour: int = 24, sample_every_nb_time: float = 1.0) -> List[str]:
         """
         Get all HDF5 file paths for a simulation, sorted by time
         
         Args:
             simu_name: Name of the simulation
             wait_age_hour: Wait time in hours before processing a file (to ensure it's completely written)
+            sample_every_nb_time: Sampling interval in N-body time units based on filename time
             
         Returns:
             List of HDF5 file paths sorted by time, excluding files younger than wait_age_hour
@@ -521,10 +522,22 @@ class HDF5FileProcessor:
         hdf5_files = sorted(
             glob(self.config.pathof[simu_name] + '/**/*.h5part', recursive=True), 
             key=lambda fn: self.get_hdf5_file_time_from_filename(fn)
-        ) # recursive allows symlink
+        )  # recursive allows symlink
         cutoff = time.time() - wait_age_hour * 3600
         hdf5_files = [
             fn for fn in hdf5_files
             if os.path.getmtime(fn) <= cutoff
         ]
-        return hdf5_files
+        if not hdf5_files:
+            return []
+
+        times = np.array([self.get_hdf5_file_time_from_filename(fn) for fn in hdf5_files], dtype=float)
+        if sample_every_nb_time <= 0:
+            return hdf5_files
+
+        targets = np.arange(times[0], times[-1] + sample_every_nb_time, sample_every_nb_time)
+        indices = np.searchsorted(times, targets, side="left") # note: 无需因可能倒带重复跑而去重，因为这一步自带去重，只会留一个
+        indices = indices[indices < len(times)]
+        unique_indices = np.unique(indices)
+
+        return [hdf5_files[i] for i in unique_indices]
