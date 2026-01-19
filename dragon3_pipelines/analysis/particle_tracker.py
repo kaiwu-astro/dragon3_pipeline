@@ -808,7 +808,7 @@ class ParticleTracker:
 
         # Calculate n_cache_tol if not provided
         if n_cache_tol is None:
-            n_cache_tol = self.config.inode_limit // len(particle_names) - 5
+            n_cache_tol = self.config.inode_limit // max(1, len(particle_names)) - 5
             logger.info(
                 f"Calculated n_cache_tol = {n_cache_tol} from inode_limit and particle count"
             )
