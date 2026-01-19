@@ -95,6 +95,8 @@ class ConfigManager:
         self.close_figure_in_ipython: bool = proc['close_figure_in_ipython']
         self.processes_count: int = proc['processes_count']
         self.tasks_per_child: int = proc['tasks_per_child']
+        self.mem_max_gb: float = proc['mem_max_gb']
+        self.inode_limit: int = proc['inode_limit']
         
         # Lagrangian radii
         self.selected_lagr_percent: List[str] = config['selected_lagr_percent']
@@ -157,9 +159,23 @@ class ConfigManager:
                 self.processes_count = proc['processes_count']
             if 'skip_until' in proc:
                 self.skip_until_of.update(proc['skip_until'])
+            if 'mem_max_gb' in proc:
+                self.mem_max_gb = proc['mem_max_gb']
+            if 'inode_limit' in proc:
+                self.inode_limit = proc['inode_limit']
     
     def _setup_derived_attributes(self) -> None:
         """Set up derived attributes that depend on configuration"""
+        # Calculate memory capacity
+        try:
+            total_mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        except Exception:
+            total_mem_bytes = self.mem_max_gb * 1024**3
+        
+        # mem_cap_bytes = min(system memory, mem_max_gb) / 2
+        # Division by 2 because data will double when extracting particle_df
+        self.mem_cap_bytes: int = min(int(total_mem_bytes), int(self.mem_max_gb * 1024**3)) // 2
+        
         # Reverse mappings
         self.stellar_type_to_kw: Dict[str, int] = {
             v: k for k, v in self.kw_to_stellar_type.items()
