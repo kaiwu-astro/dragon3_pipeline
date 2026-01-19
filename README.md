@@ -30,9 +30,6 @@ pip install -e ".[dev]"
 # Run with default configuration
 python -m dragon3_pipelines
 
-# Or use the legacy script (backward compatible)
-python plot_nbody.py --skip-until=100
-
 # Create movies from plots
 bash dragon3_jpg_to_movie.sh
 ```
@@ -77,10 +74,6 @@ Load it in your code:
 from dragon3_pipelines.config import load_config
 config = load_config("config.yaml")
 ```
-
-### Legacy Configuration
-
-For backward compatibility, you can still edit paths directly in `plot_nbody.py` as before.
 
 ## Package Structure
 
