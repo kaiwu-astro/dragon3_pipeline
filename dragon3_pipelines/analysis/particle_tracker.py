@@ -98,7 +98,7 @@ class ParticleTracker:
         else:
             _tqdm_kwargs = {"desc": "Getting particle df"}
         if _in_mp:
-            _tqdm_kwargs.update({"position": _pos, "leave": False})
+            _tqdm_kwargs.update({"position": _pos, "leave": True})
 
         for pname in tqdm(
             particle_names,
@@ -511,7 +511,7 @@ class ParticleTracker:
         cache_file_count = len(individual_cache_files)
 
         if cache_file_count < n_cache_tol:
-            # Strategy 1: Just append a new feather file
+            # Strategy 1: Just write a new feather file
             new_cache_file = os.path.join(
                 particle_dir, f"{particle_name}_df_{t_start:.6f}_to_{t_end:.6f}.df.feather"
             )
@@ -904,6 +904,13 @@ class ParticleTracker:
                 if dfs
             ]
 
+            cache_base = self.config.particle_df_cache_dir_of[simu_name]
+            particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
+            os.makedirs(particle_dir_0, exist_ok=True)
+            cache_file_count_0 = len(glob(
+                os.path.join(particle_dir_0, f"{particle_names[0]}_df_*.df.feather")
+            ))
+
             if tasks:
                 with ctx.Pool(
                     processes=self.config.processes_count,
@@ -913,7 +920,8 @@ class ParticleTracker:
                     for _ in tqdm(
                         iterator,
                         total=len(tasks),
-                        desc=f"Accumulating particle caches in {simu_name}",
+                        desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
+                        f"Accumulating particle caches in {simu_name}",
                     ):
                         pass
             # 6. Update progress file
