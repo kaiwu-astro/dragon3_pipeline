@@ -40,8 +40,7 @@ class ParticleTracker:
         df_dict: Optional[Dict[str, pd.DataFrame]] = None,
         particle_name: Union[int, Iterable[int], str] = "all",
         hdf5_file_path: Optional[str] = None,
-        simu_name: Optional[str] = None,
-        save_cache: bool = False,
+        simu_name: Optional[str] = None
     ) -> Union[pd.DataFrame, Dict[int, pd.DataFrame]]:
         """
         Track particle(s) evolution through snapshots in an HDF5 file
@@ -53,9 +52,8 @@ class ParticleTracker:
                 - int: track a single particle
                 - list-like of ints: track multiple specific particles
                 - "all": track all particles found in df_dict
-            hdf5_file_path: Path to HDF5 file (required when df_dict is None or save_cache=True)
-            simu_name: Simulation name (required when df_dict is None or save_cache=True)
-            save_cache: If True, save individual particle DataFrames to cache files
+            hdf5_file_path: Path to HDF5 file (required when df_dict is None)
+            simu_name: Simulation name (required when df_dict is None)
 
         Returns:
             If particle_name is int: DataFrame containing all time points for this particle
@@ -69,9 +67,6 @@ class ParticleTracker:
             if hdf5_file_path is None or simu_name is None:
                 raise ValueError("hdf5_file_path and simu_name are required when df_dict is None")
             df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
-
-        if save_cache and (hdf5_file_path is None or simu_name is None):
-            raise ValueError("hdf5_file_path and simu_name are required when save_cache=True")
 
         # Handle special case: particle_name == "all" means process all particles
         if particle_name == "all":
@@ -101,10 +96,6 @@ class ParticleTracker:
             leave=False
         ):
             particle_df = self._get_one_particle_df(df_dict, int(pname))
-            if save_cache and not particle_df.empty:
-                assert hdf5_file_path is not None
-                assert simu_name is not None
-                self._save_particle_cache(particle_df, int(pname), hdf5_file_path, simu_name)
             result_dict[int(pname)] = particle_df
 
         return result_dict
@@ -599,35 +590,6 @@ class ParticleTracker:
     ) -> Tuple[int, pd.DataFrame]:
         df_dict, particle_name = args
         return particle_name, self._get_one_particle_df(df_dict, particle_name)
-
-    def _save_particle_cache(
-        self, particle_df: pd.DataFrame, particle_name: int, hdf5_file_path: str, simu_name: str
-    ) -> None:
-        """
-        Save particle DataFrame to cache file (feather)
-
-        Args:
-            particle_df: DataFrame for a single particle from one HDF5 file
-            particle_name: Particle name
-            hdf5_file_path: Path to the HDF5 file
-            simu_name: Simulation name
-        """
-        # Get HDF5 file time from filename
-        hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
-
-        # Create particle-specific subdirectory
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        particle_cache_dir = os.path.join(cache_base, str(particle_name))
-        os.makedirs(particle_cache_dir, exist_ok=True)
-
-        # Save to feather file with naming: {hdf5_time}.{particle_name}.df.feather
-        cache_file = os.path.join(particle_cache_dir, f"{hdf5_time:.6f}.{particle_name}.df.feather")
-
-        try:
-            particle_df.to_feather(cache_file)
-            logger.debug(f"Saved particle {particle_name} cache to {cache_file}")
-        except Exception as e:
-            logger.warning(f"Failed to save particle {particle_name} cache: {e}")
 
     def _read_progress_file(self, simu_name: str) -> float:
         """

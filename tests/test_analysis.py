@@ -262,13 +262,6 @@ class TestParticleTracker:
                 cache_files = list(particle_dir.glob("*.feather"))
                 assert len(cache_files) > 0
 
-    def test_get_particle_df_from_hdf5_file_all_requires_params(
-        self, particle_tracker, sample_df_dict
-    ):
-        """Test that 'all' mode with save_cache requires hdf5_file_path and simu_name"""
-        with pytest.raises(ValueError, match="hdf5_file_path and simu_name are required"):
-            particle_tracker.get_particle_df_from_hdf5_file(sample_df_dict, "all", save_cache=True)
-
     def test_update_one_particle_reads_merged_cache(self, particle_tracker, mock_config, tmp_path):
         """Test that update_one_particle_history_df prioritizes merged cache format"""
         mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
