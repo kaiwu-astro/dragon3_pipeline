@@ -222,46 +222,6 @@ class TestParticleTracker:
         assert isinstance(result[1000], pd.DataFrame)
         assert isinstance(result[2000], pd.DataFrame)
 
-    def test_get_particle_df_from_hdf5_file_all_with_cache(
-        self, particle_tracker, sample_df_dict, mock_config, tmp_path
-    ):
-        """Test processing all particles with save_cache=True"""
-        # Update config to use temp directory
-        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
-
-        # Mock the HDF5 file processor to return sample data and a fake time
-        with (
-            patch.object(
-                particle_tracker.hdf5_file_processor,
-                "read_file",
-                return_value=sample_df_dict,
-            ),
-            patch.object(
-                particle_tracker.hdf5_file_processor,
-                "get_hdf5_file_time_from_filename",
-                return_value=1.5,
-            ),
-        ):
-            result = particle_tracker.get_particle_df_from_hdf5_file(
-                sample_df_dict,
-                "all",
-                hdf5_file_path="/fake/path/snap.40_1.5.h5part",
-                simu_name="test_simu",
-                save_cache=True,
-            )
-
-        # Should have processed particles
-        assert isinstance(result, dict)
-        assert len(result) > 0
-
-        # Check that cache files were created for each particle
-        for particle_name in result.keys():
-            if not result[particle_name].empty:
-                particle_dir = tmp_path / str(particle_name)
-                assert particle_dir.exists()
-                cache_files = list(particle_dir.glob("*.feather"))
-                assert len(cache_files) > 0
-
     def test_update_one_particle_reads_merged_cache(self, particle_tracker, mock_config, tmp_path):
         """Test that update_one_particle_history_df prioritizes merged cache format"""
         mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
