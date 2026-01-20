@@ -106,209 +106,229 @@ class ParticleTracker:
 
         return result_dict
 
-    def _get_single_particle_df(
-        self, df_dict: Dict[str, pd.DataFrame], particle_name: int
-    ) -> pd.DataFrame:
-        """
-        Extract a single particle's data from df_dict
-
-        Args:
-            df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames
-            particle_name: Particle Name to track
-
-        Returns:
-            DataFrame containing all time points for this particle in the HDF5 file
-        """
-        single_df_all = df_dict["singles"]
-        binary_df_all = df_dict["binaries"]
-
-        # Extract records for this particle from single star data
-        single_particle_df = single_df_all[single_df_all["Name"] == particle_name].copy()
-
-        # Extract records from binary data
-        # Check if particle appears as member 1 or member 2 of a binary
-        # Note: this is necessary due to a star may sometimes be Bin 1 and sometimes Bin 2
-        #       even in the same hdf5 file
-        binary_as_1 = binary_df_all[binary_df_all["Bin Name1"] == particle_name].copy()
-        binary_as_1["state"] = "binary"
-        binary_as_1["companion_name"] = binary_as_1["Bin Name2"]
-        binary_as_2 = binary_df_all[binary_df_all["Bin Name2"] == particle_name].copy()
-        binary_as_2["state"] = "binary"
-        binary_as_2["companion_name"] = binary_as_2["Bin Name1"]
-
-        _binary = pd.concat([binary_as_1, binary_as_2], ignore_index=True)
-
-        if not _binary["TTOT"].is_unique:
-            logger.warning(
-                f"Warning: Particle {particle_name} is found in both components at TTOT = {_binary['TTOT'][_binary['TTOT'].duplicated()].unique()}"
-            )
-            _binary = _binary.drop_duplicates(subset=["TTOT"], keep="first")
-
-        # Merge all records
-        if binary_as_1.empty and binary_as_2.empty:
-            single_particle_df["state"] = "single"
-            single_particle_df["companion_name"] = np.nan
-            particle_df = single_particle_df
-        else:
-            # Particle is in a binary
-            particle_df = single_particle_df.merge(
-                _binary,
-                on="TTOT",
-                how="outer",
-                suffixes=(
-                    "",
-                    "_from_binary",
-                ),  # Columns with same name from single vs binary get suffix
-            )
-
-        if not particle_df.empty:
-            particle_df = particle_df.sort_values("TTOT").reset_index(drop=True)
-            return particle_df
-        else:
-            logger.debug(
-                f"Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}"
-            )
-            return pd.DataFrame()
-
-    def _save_particle_cache(
-        self, particle_df: pd.DataFrame, particle_name: int, hdf5_file_path: str, simu_name: str
+    @log_time(logger)
+    def update_multiple_particle_history_df(
+        self, simu_name: str, particle_names: Iterable[int], n_cache_tol: Optional[int] = None
     ) -> None:
         """
-        Save particle DataFrame to cache file (feather)
+        Process specified particles in the simulation using HDF5-centric batch iteration.
 
         Args:
-            particle_df: DataFrame for a single particle from one HDF5 file
-            particle_name: Particle name
-            hdf5_file_path: Path to the HDF5 file
-            simu_name: Simulation name
+            simu_name: Name of the simulation
+            particle_names: List-like of particle names (ints)
+            n_cache_tol: Maximum number of cache files before triggering merge.
+                        If None, calculates as inode_limit // len(particle_names) - 5
         """
-        # Get HDF5 file time from filename
-        hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
+        particle_names = [int(p) for p in particle_names]
+        if not particle_names:
+            logger.info("No particle_names provided, nothing to process")
+            return
 
-        # Create particle-specific subdirectory
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        particle_cache_dir = os.path.join(cache_base, str(particle_name))
-        os.makedirs(particle_cache_dir, exist_ok=True)
-
-        # Save to feather file with naming: {hdf5_time}.{particle_name}.df.feather
-        cache_file = os.path.join(particle_cache_dir, f"{hdf5_time:.6f}.{particle_name}.df.feather")
-
-        try:
-            particle_df.to_feather(cache_file)
-            logger.debug(f"Saved particle {particle_name} cache to {cache_file}")
-        except Exception as e:
-            logger.warning(f"Failed to save particle {particle_name} cache: {e}")
-
-    def _read_progress_file(self, simu_name: str) -> float:
-        """
-        Read the progress file to get the last processed HDF5 time
-
-        Args:
-            simu_name: Simulation name
-
-        Returns:
-            Last processed HDF5 time (or -1.0 if no progress file exists)
-        """
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        progress_file = os.path.join(cache_base, "_progress.txt")
-
-        if not os.path.exists(progress_file):
-            return -1.0
-
-        try:
-            with open(progress_file, "r") as f:
-                content = f.read().strip()
-                if content:
-                    return float(content)
-        except Exception as e:
-            logger.warning(f"Failed to read progress file {progress_file}: {e}")
-
-        return -1.0
-
-    def _write_progress_file(self, simu_name: str, hdf5_time: float) -> None:
-        """
-        Write the progress file with the last processed HDF5 time
-
-        Args:
-            simu_name: Simulation name
-            hdf5_time: HDF5 file time to record
-        """
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        os.makedirs(cache_base, exist_ok=True)
-        progress_file = os.path.join(cache_base, "_progress.txt")
-
-        try:
-            with open(progress_file, "w") as f:
-                f.write(f"{hdf5_time}\n")
-            logger.debug(f"Updated progress file to {hdf5_time}")
-        except Exception as e:
-            logger.warning(f"Failed to write progress file {progress_file}: {e}")
-
-    @log_time(logger)
-    def get_particle_summary(self, particle_history_df: pd.DataFrame) -> Dict[str, Any]:
-        """
-        Get summary information about a particle's evolution history
-
-        Args:
-            particle_history_df: DataFrame returned by track_particle
-
-        Returns:
-            summary_dict: Dictionary containing key information about particle evolution
-        """
-        if particle_history_df.empty:
-            return {}
-
-        summary = {
-            "particle_name": (
-                particle_history_df["Name"].iloc[0]
-                if "Name" in particle_history_df.columns
-                else None
-            ),
-            "total_snapshots": len(particle_history_df),
-            "time_range_myr": (
-                particle_history_df["Time[Myr]"].min(),
-                particle_history_df["Time[Myr]"].max(),
-            ),
-            "single_count": len(particle_history_df[particle_history_df["state"] == "single"]),
-            "binary_count": len(
-                particle_history_df[particle_history_df["state"].str.contains("binary", na=False)]
-            ),
-            "initial_mass": (
-                particle_history_df["M"].iloc[0] if "M" in particle_history_df.columns else None
-            ),
-            "final_mass": (
-                particle_history_df["M"].iloc[-1] if "M" in particle_history_df.columns else None
-            ),
-            "stellar_types": (
-                particle_history_df["KW"].unique().tolist()
-                if "KW" in particle_history_df.columns
-                else []
-            ),
-        }
-
-        return summary
-
-    def _process_single_hdf5_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
-        """
-        Worker function for parallel processing of HDF5 files
-
-        Args:
-            args: Tuple of (hdf5_file_path, particle_name, simu_name)
-
-        Returns:
-            DataFrame with particle data from all snapshots in this HDF5 file
-        """
-        hdf5_file_path, particle_name, simu_name = args
-
-        try:
-            df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
-            particle_df = self.get_particle_df_from_hdf5_file(df_dict, particle_name)
-            return particle_df
-        except Exception as e:
-            logger.error(
-                f"Error processing {hdf5_file_path} for particle {particle_name}: {type(e).__name__}: {e}"
+        # Calculate n_cache_tol if not provided
+        if n_cache_tol is None:
+            n_cache_tol = self.config.inode_limit // max(1, len(particle_names)) - 5
+            logger.info(
+                f"Calculated n_cache_tol = {n_cache_tol} from inode_limit and particle count"
             )
-            return pd.DataFrame()
+
+        # 1. Get all HDF5 files
+        hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
+
+        # 2. Read progress file to skip already-processed files
+        last_processed_time = self._read_progress_file(simu_name)
+        files_to_process = [
+            f
+            for f in hdf5_files
+            if self.hdf5_file_processor.get_hdf5_file_time_from_filename(f) > last_processed_time
+        ]
+
+        if not files_to_process:
+            logger.info(f"No new HDF5 files to process for simulation {simu_name}")
+            logger.info(f"Last processed time: {last_processed_time}")
+            return
+
+        logger.info(
+            f"Found {len(files_to_process)} HDF5 files to process for simulation {simu_name}"
+        )
+        logger.info(f"Processing files from {files_to_process[0]} to {files_to_process[-1]}")
+
+        # 3. Estimate batch size based on memory cap
+        sample_path = files_to_process[0]
+        try:
+            sample_df_dict = self.hdf5_file_processor.read_file(sample_path, simu_name)
+        except Exception as e:
+            logger.error(f"Failed to read sample HDF5 file {sample_path}: {e}")
+            return
+
+        per_file_bytes = 0
+        for df in sample_df_dict.values():
+            if isinstance(df, pd.DataFrame):
+                per_file_bytes += int(df.memory_usage(deep=True).sum())
+
+        mem_cap_bytes = self.config.mem_cap_bytes
+        if per_file_bytes <= 0:
+            batch_size = 1
+        else:
+            batch_size = max(1, int(mem_cap_bytes // per_file_bytes))
+
+        batch_size = min(batch_size, len(files_to_process))
+        logger.info(
+            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
+            f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
+            f"batch_size: {batch_size}"
+        )
+
+        # 4. Batch process HDF5 files
+        in_mem_particle_dfs: Dict[int, list] = {}
+        in_mem_time_start: Optional[float] = None
+        last_batch_end: Optional[float] = None
+
+        for start in tqdm(
+            range(0, len(files_to_process), batch_size),
+            desc=f"Processing all HDF5 batches {simu_name}",
+        ):
+            batch_files = files_to_process[start : start + batch_size]
+            batch_particle_dfs: Dict[int, list] = {}
+
+            ctx = multiprocessing.get_context("forkserver")
+            tasks = [(fpath, simu_name, particle_names) for fpath in batch_files]
+
+            with ctx.Pool(
+                processes=min(batch_size, self.config.processes_count), maxtasksperchild=self.config.tasks_per_child
+            ) as pool:
+                iterator = pool.imap(self._process_single_hdf5_for_particles_mp, tasks)
+                for _, result_dict in tqdm(
+                    iterator, total=len(tasks), desc=f"Processing HDF5 batch in {simu_name}"
+                ):
+                    if not result_dict:
+                        continue
+                    for pname, pdf in result_dict.items():
+                        if pdf is not None and not pdf.empty:
+                            batch_particle_dfs.setdefault(int(pname), []).append(pdf)
+
+            # 5. Accumulate and persist per particle
+            # Get time range for this batch
+            t_batch_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[0])
+            t_batch_end = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[-1])
+            last_batch_end = t_batch_end
+
+            # Decide whether to keep in memory or accumulate
+            def _estimate_in_mem_bytes(pdict: Dict[int, list]) -> int:
+                for _, dfs in pdict.items():
+                    if dfs:
+                        return int(dfs[0].memory_usage(deep=True).sum()) * sum(
+                            len(v) for v in pdict.values()
+                        )
+                return 0
+
+            # Merge dict
+            tentative_in_mem = {}
+            if in_mem_particle_dfs:
+                tentative_in_mem = {k: list(v) for k, v in in_mem_particle_dfs.items()}
+            for pname, dfs in batch_particle_dfs.items():
+                if dfs:
+                    tentative_in_mem.setdefault(int(pname), []).extend(dfs)
+
+            est_bytes = _estimate_in_mem_bytes(tentative_in_mem)
+            if est_bytes <= self.config.mem_cap_bytes / 4:
+                if not in_mem_particle_dfs:
+                    in_mem_time_start = t_batch_start
+                in_mem_particle_dfs = tentative_in_mem
+                continue
+            else: # write to file (mem threshold exceeded)
+                t_start = in_mem_time_start if in_mem_time_start is not None else t_batch_start
+                t_end = t_batch_end
+
+                tasks = [
+                    (
+                        simu_name,
+                        int(pname),
+                        pd.concat(dfs, ignore_index=True),
+                        t_start,
+                        t_end,
+                        n_cache_tol,
+                    )
+                    for pname, dfs in tentative_in_mem.items()
+                    if dfs
+                ]
+
+                cache_base = self.config.particle_df_cache_dir_of[simu_name]
+                particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
+                os.makedirs(particle_dir_0, exist_ok=True)
+                cache_file_count_0 = len(glob(
+                    os.path.join(particle_dir_0, f"{particle_names[0]}_df_*.df.feather")
+                ))
+
+                if tasks:
+                    with ctx.Pool(
+                        processes=self.config.processes_count,
+                        maxtasksperchild=self.config.tasks_per_child,
+                    ) as pool:
+                        iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
+                        for _ in tqdm(
+                            iterator,
+                            total=len(tasks),
+                            desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
+                            f"Accumulating particle caches in {simu_name}",
+                        ):
+                            pass
+
+                in_mem_particle_dfs = {}
+                in_mem_time_start = None
+                # Update progress after accumulate
+                self._write_progress_file(simu_name, t_end)
+
+        # After looping over all hdf5s, flush remaining in-memory data
+        if in_mem_particle_dfs and last_batch_end is not None:
+            t_start = in_mem_time_start if in_mem_time_start is not None else last_batch_end
+            t_end = last_batch_end
+
+            tasks = [
+                (
+                    simu_name,
+                    int(pname),
+                    pd.concat(dfs, ignore_index=True),
+                    t_start,
+                    t_end,
+                    1, # n_cache_tol set to 1 to force merge at the end
+                )
+                for pname, dfs in in_mem_particle_dfs.items()
+                if dfs
+            ]
+
+            if tasks:
+                with ctx.Pool(
+                    processes=self.config.processes_count,
+                    maxtasksperchild=self.config.tasks_per_child,
+                ) as pool:
+                    iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
+                    for _ in tqdm(
+                        iterator,
+                        total=len(tasks),
+                        desc=f"Accumulating particle caches in {simu_name}",
+                    ):
+                        pass
+
+            self._write_progress_file(simu_name, t_end)
+
+        logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
+
+    def save_every_particle_history_of_sim(
+        self,
+        simu_name: str,
+    ) -> None:
+        """
+        Call update_multiple_particle_history_df, process for all particles.
+        CAUTION: this is likely to drain you disk INODE. Only use for small star clusters.
+        Args:
+            simu_name: Name of the simulation
+        """
+        # get all particle names from the first hdf5 file
+        first_hdf5_path = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)[0]
+        df_dict = self.hdf5_file_processor.read_file(first_hdf5_path, simu_name)
+        single_df_all = df_dict["singles"]
+        particle_names = single_df_all["Name"].unique().tolist()
+        return self.update_multiple_particle_history_df(simu_name, particle_names)
 
     @log_time(logger)
     def update_one_particle_history_df(
@@ -461,6 +481,210 @@ class ParticleTracker:
             return new_particle_history_df
         else:
             return old_particle_history_df
+
+    @log_time(logger)
+    def get_particle_summary(self, particle_history_df: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Get summary information about a particle's evolution history
+
+        Args:
+            particle_history_df: DataFrame returned by track_particle
+
+        Returns:
+            summary_dict: Dictionary containing key information about particle evolution
+        """
+        if particle_history_df.empty:
+            return {}
+
+        summary = {
+            "particle_name": (
+                particle_history_df["Name"].iloc[0]
+                if "Name" in particle_history_df.columns
+                else None
+            ),
+            "total_snapshots": len(particle_history_df),
+            "time_range_myr": (
+                particle_history_df["Time[Myr]"].min(),
+                particle_history_df["Time[Myr]"].max(),
+            ),
+            "single_count": len(particle_history_df[particle_history_df["state"] == "single"]),
+            "binary_count": len(
+                particle_history_df[particle_history_df["state"].str.contains("binary", na=False)]
+            ),
+            "initial_mass": (
+                particle_history_df["M"].iloc[0] if "M" in particle_history_df.columns else None
+            ),
+            "final_mass": (
+                particle_history_df["M"].iloc[-1] if "M" in particle_history_df.columns else None
+            ),
+            "stellar_types": (
+                particle_history_df["KW"].unique().tolist()
+                if "KW" in particle_history_df.columns
+                else []
+            ),
+        }
+
+        return summary
+
+    def _get_single_particle_df(
+        self, df_dict: Dict[str, pd.DataFrame], particle_name: int
+    ) -> pd.DataFrame:
+        """
+        Extract a single particle's data from df_dict
+
+        Args:
+            df_dict: Dictionary containing 'singles', 'binaries', 'scalars' DataFrames
+            particle_name: Particle Name to track
+
+        Returns:
+            DataFrame containing all time points for this particle in the HDF5 file
+        """
+        single_df_all = df_dict["singles"]
+        binary_df_all = df_dict["binaries"]
+
+        # Extract records for this particle from single star data
+        single_particle_df = single_df_all[single_df_all["Name"] == particle_name].copy()
+
+        # Extract records from binary data
+        # Check if particle appears as member 1 or member 2 of a binary
+        # Note: this is necessary due to a star may sometimes be Bin 1 and sometimes Bin 2
+        #       even in the same hdf5 file
+        binary_as_1 = binary_df_all[binary_df_all["Bin Name1"] == particle_name].copy()
+        binary_as_1["state"] = "binary"
+        binary_as_1["companion_name"] = binary_as_1["Bin Name2"]
+        binary_as_2 = binary_df_all[binary_df_all["Bin Name2"] == particle_name].copy()
+        binary_as_2["state"] = "binary"
+        binary_as_2["companion_name"] = binary_as_2["Bin Name1"]
+
+        _binary = pd.concat([binary_as_1, binary_as_2], ignore_index=True)
+
+        if not _binary["TTOT"].is_unique:
+            logger.warning(
+                f"Warning: Particle {particle_name} is found in both components at TTOT = {_binary['TTOT'][_binary['TTOT'].duplicated()].unique()}"
+            )
+            _binary = _binary.drop_duplicates(subset=["TTOT"], keep="first")
+
+        # Merge all records
+        if binary_as_1.empty and binary_as_2.empty:
+            single_particle_df["state"] = "single"
+            single_particle_df["companion_name"] = np.nan
+            particle_df = single_particle_df
+        else:
+            # Particle is in a binary
+            particle_df = single_particle_df.merge(
+                _binary,
+                on="TTOT",
+                how="outer",
+                suffixes=(
+                    "",
+                    "_from_binary",
+                ),  # Columns with same name from single vs binary get suffix
+            )
+
+        if not particle_df.empty:
+            particle_df = particle_df.sort_values("TTOT").reset_index(drop=True)
+            return particle_df
+        else:
+            logger.debug(
+                f"Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}"
+            )
+            return pd.DataFrame()
+
+    def _save_particle_cache(
+        self, particle_df: pd.DataFrame, particle_name: int, hdf5_file_path: str, simu_name: str
+    ) -> None:
+        """
+        Save particle DataFrame to cache file (feather)
+
+        Args:
+            particle_df: DataFrame for a single particle from one HDF5 file
+            particle_name: Particle name
+            hdf5_file_path: Path to the HDF5 file
+            simu_name: Simulation name
+        """
+        # Get HDF5 file time from filename
+        hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
+
+        # Create particle-specific subdirectory
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        particle_cache_dir = os.path.join(cache_base, str(particle_name))
+        os.makedirs(particle_cache_dir, exist_ok=True)
+
+        # Save to feather file with naming: {hdf5_time}.{particle_name}.df.feather
+        cache_file = os.path.join(particle_cache_dir, f"{hdf5_time:.6f}.{particle_name}.df.feather")
+
+        try:
+            particle_df.to_feather(cache_file)
+            logger.debug(f"Saved particle {particle_name} cache to {cache_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save particle {particle_name} cache: {e}")
+
+    def _read_progress_file(self, simu_name: str) -> float:
+        """
+        Read the progress file to get the last processed HDF5 time
+
+        Args:
+            simu_name: Simulation name
+
+        Returns:
+            Last processed HDF5 time (or -1.0 if no progress file exists)
+        """
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        progress_file = os.path.join(cache_base, "_progress.txt")
+
+        if not os.path.exists(progress_file):
+            return -1.0
+
+        try:
+            with open(progress_file, "r") as f:
+                content = f.read().strip()
+                if content:
+                    return float(content)
+        except Exception as e:
+            logger.warning(f"Failed to read progress file {progress_file}: {e}")
+
+        return -1.0
+
+    def _write_progress_file(self, simu_name: str, hdf5_time: float) -> None:
+        """
+        Write the progress file with the last processed HDF5 time
+
+        Args:
+            simu_name: Simulation name
+            hdf5_time: HDF5 file time to record
+        """
+        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        os.makedirs(cache_base, exist_ok=True)
+        progress_file = os.path.join(cache_base, "_progress.txt")
+
+        try:
+            with open(progress_file, "w") as f:
+                f.write(f"{hdf5_time}\n")
+            logger.debug(f"Updated progress file to {hdf5_time}")
+        except Exception as e:
+            logger.warning(f"Failed to write progress file {progress_file}: {e}")
+
+    def _process_single_hdf5_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
+        """
+        Worker function for parallel processing of HDF5 files
+
+        Args:
+            args: Tuple of (hdf5_file_path, particle_name, simu_name)
+
+        Returns:
+            DataFrame with particle data from all snapshots in this HDF5 file
+        """
+        hdf5_file_path, particle_name, simu_name = args
+
+        try:
+            df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+            particle_df = self.get_particle_df_from_hdf5_file(df_dict, particle_name)
+            return particle_df
+        except Exception as e:
+            logger.error(
+                f"Error processing {hdf5_file_path} for particle {particle_name}: {type(e).__name__}: {e}"
+            )
+            return pd.DataFrame()
 
     def _accumulate_particle_df(
         self,
@@ -691,7 +915,6 @@ class ParticleTracker:
             logger.error(f"Failed to merge cache for particle {particle_name}: {e}")
             return particle_name, False
 
-    @log_time(logger)
     def _merge_particle_caches_memory_aware(
         self, simu_name: str, particle_names: Iterable[int]
     ) -> None:
@@ -780,230 +1003,6 @@ class ParticleTracker:
             )
 
         logger.info(f"Memory-aware cache merge completed for {simu_name}")
-
-    @log_time(logger)
-    def update_multiple_particle_history_df(
-        self, simu_name: str, particle_names: Iterable[int], n_cache_tol: Optional[int] = None
-    ) -> None:
-        """
-        Process specified particles in the simulation using HDF5-centric batch iteration.
-
-        Args:
-            simu_name: Name of the simulation
-            particle_names: List-like of particle names (ints)
-            n_cache_tol: Maximum number of cache files before triggering merge.
-                        If None, calculates as inode_limit // len(particle_names) - 5
-        """
-        particle_names = [int(p) for p in particle_names]
-        if not particle_names:
-            logger.info("No particle_names provided, nothing to process")
-            return
-
-        # Calculate n_cache_tol if not provided
-        if n_cache_tol is None:
-            n_cache_tol = self.config.inode_limit // max(1, len(particle_names)) - 5
-            logger.info(
-                f"Calculated n_cache_tol = {n_cache_tol} from inode_limit and particle count"
-            )
-
-        # 1. Get all HDF5 files
-        hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
-
-        # 2. Read progress file to skip already-processed files
-        last_processed_time = self._read_progress_file(simu_name)
-        files_to_process = [
-            f
-            for f in hdf5_files
-            if self.hdf5_file_processor.get_hdf5_file_time_from_filename(f) > last_processed_time
-        ]
-
-        if not files_to_process:
-            logger.info(f"No new HDF5 files to process for simulation {simu_name}")
-            logger.info(f"Last processed time: {last_processed_time}")
-            return
-
-        logger.info(
-            f"Found {len(files_to_process)} HDF5 files to process for simulation {simu_name}"
-        )
-        logger.info(f"Processing files from {files_to_process[0]} to {files_to_process[-1]}")
-
-        # 3. Estimate batch size based on memory cap
-        sample_path = files_to_process[0]
-        try:
-            sample_df_dict = self.hdf5_file_processor.read_file(sample_path, simu_name)
-        except Exception as e:
-            logger.error(f"Failed to read sample HDF5 file {sample_path}: {e}")
-            return
-
-        per_file_bytes = 0
-        for df in sample_df_dict.values():
-            if isinstance(df, pd.DataFrame):
-                per_file_bytes += int(df.memory_usage(deep=True).sum())
-
-        mem_cap_bytes = self.config.mem_cap_bytes
-        if per_file_bytes <= 0:
-            batch_size = 1
-        else:
-            batch_size = max(1, int(mem_cap_bytes // per_file_bytes))
-
-        batch_size = min(batch_size, len(files_to_process))
-        logger.info(
-            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
-            f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
-            f"batch_size: {batch_size}"
-        )
-
-        # 4. Batch process HDF5 files
-        in_mem_particle_dfs: Dict[int, list] = {}
-        in_mem_time_start: Optional[float] = None
-        last_batch_end: Optional[float] = None
-
-        for start in tqdm(
-            range(0, len(files_to_process), batch_size),
-            desc=f"Processing all HDF5 batches {simu_name}",
-        ):
-            batch_files = files_to_process[start : start + batch_size]
-            batch_particle_dfs: Dict[int, list] = {}
-
-            ctx = multiprocessing.get_context("forkserver")
-            tasks = [(fpath, simu_name, particle_names) for fpath in batch_files]
-
-            with ctx.Pool(
-                processes=min(batch_size, self.config.processes_count), maxtasksperchild=self.config.tasks_per_child
-            ) as pool:
-                iterator = pool.imap(self._process_single_hdf5_for_particles_mp, tasks)
-                for _, result_dict in tqdm(
-                    iterator, total=len(tasks), desc=f"Processing HDF5 batch in {simu_name}"
-                ):
-                    if not result_dict:
-                        continue
-                    for pname, pdf in result_dict.items():
-                        if pdf is not None and not pdf.empty:
-                            batch_particle_dfs.setdefault(int(pname), []).append(pdf)
-
-            # 5. Accumulate and persist per particle
-            # Get time range for this batch
-            t_batch_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[0])
-            t_batch_end = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[-1])
-            last_batch_end = t_batch_end
-
-            # Decide whether to keep in memory or accumulate
-            def _estimate_in_mem_bytes(pdict: Dict[int, list]) -> int:
-                for _, dfs in pdict.items():
-                    if dfs:
-                        return int(dfs[0].memory_usage(deep=True).sum()) * sum(
-                            len(v) for v in pdict.values()
-                        )
-                return 0
-
-            # Merge dict
-            tentative_in_mem = {}
-            if in_mem_particle_dfs:
-                tentative_in_mem = {k: list(v) for k, v in in_mem_particle_dfs.items()}
-            for pname, dfs in batch_particle_dfs.items():
-                if dfs:
-                    tentative_in_mem.setdefault(int(pname), []).extend(dfs)
-
-            est_bytes = _estimate_in_mem_bytes(tentative_in_mem)
-            if est_bytes <= self.config.mem_cap_bytes / 4:
-                if not in_mem_particle_dfs:
-                    in_mem_time_start = t_batch_start
-                in_mem_particle_dfs = tentative_in_mem
-                continue
-            else: # write to file (mem threshold exceeded)
-                t_start = in_mem_time_start if in_mem_time_start is not None else t_batch_start
-                t_end = t_batch_end
-
-                tasks = [
-                    (
-                        simu_name,
-                        int(pname),
-                        pd.concat(dfs, ignore_index=True),
-                        t_start,
-                        t_end,
-                        n_cache_tol,
-                    )
-                    for pname, dfs in tentative_in_mem.items()
-                    if dfs
-                ]
-
-                cache_base = self.config.particle_df_cache_dir_of[simu_name]
-                particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
-                os.makedirs(particle_dir_0, exist_ok=True)
-                cache_file_count_0 = len(glob(
-                    os.path.join(particle_dir_0, f"{particle_names[0]}_df_*.df.feather")
-                ))
-
-                if tasks:
-                    with ctx.Pool(
-                        processes=self.config.processes_count,
-                        maxtasksperchild=self.config.tasks_per_child,
-                    ) as pool:
-                        iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
-                        for _ in tqdm(
-                            iterator,
-                            total=len(tasks),
-                            desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
-                            f"Accumulating particle caches in {simu_name}",
-                        ):
-                            pass
-
-                in_mem_particle_dfs = {}
-                in_mem_time_start = None
-                # Update progress after accumulate
-                self._write_progress_file(simu_name, t_end)
-
-        # After looping over all hdf5s, flush remaining in-memory data
-        if in_mem_particle_dfs and last_batch_end is not None:
-            t_start = in_mem_time_start if in_mem_time_start is not None else last_batch_end
-            t_end = last_batch_end
-
-            tasks = [
-                (
-                    simu_name,
-                    int(pname),
-                    pd.concat(dfs, ignore_index=True),
-                    t_start,
-                    t_end,
-                    1, # n_cache_tol set to 1 to force merge at the end
-                )
-                for pname, dfs in in_mem_particle_dfs.items()
-                if dfs
-            ]
-
-            if tasks:
-                with ctx.Pool(
-                    processes=self.config.processes_count,
-                    maxtasksperchild=self.config.tasks_per_child,
-                ) as pool:
-                    iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
-                    for _ in tqdm(
-                        iterator,
-                        total=len(tasks),
-                        desc=f"Accumulating particle caches in {simu_name}",
-                    ):
-                        pass
-
-            self._write_progress_file(simu_name, t_end)
-
-        logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
-
-    def save_every_particle_df_of_sim(
-        self,
-        simu_name: str,
-    ) -> None:
-        """
-        Call update_multiple_particle_history_df, process for all particles.
-        CAUTION: this is likely to drain you disk INODE. Only use for small star clusters.
-        Args:
-            simu_name: Name of the simulation
-        """
-        # get all particle names from the first hdf5 file
-        first_hdf5_path = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)[0]
-        df_dict = self.hdf5_file_processor.read_file(first_hdf5_path, simu_name)
-        single_df_all = df_dict["singles"]
-        particle_names = single_df_all["Name"].unique().tolist()
-        return self.update_multiple_particle_history_df(simu_name, particle_names)
 
     def _get_single_particle_df_mp(
         self, args: Tuple[Dict[str, pd.DataFrame], int]
