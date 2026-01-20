@@ -195,12 +195,20 @@ def main() -> int:
         long_options = ["skip-until=", "debug"]
         opts, args = getopt.getopt(sys.argv[1:], "k:", long_options)
         if "--debug" in dict(opts):
-            logger.setLevel(logging.DEBUG)
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+            )
         else:
-            logger.setLevel(logging.INFO)
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+            )
     except getopt.GetoptError as err:
         print(err)
         sys.exit(2)
+
+
 
     config = ConfigManager(opts=opts)
 
