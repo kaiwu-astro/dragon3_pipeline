@@ -63,7 +63,7 @@ class ParticleTracker:
         """
         if isinstance(particle_name, (int, np.integer)):
             assert df_dict is not None, "df_dict is required for single-particle mode"
-            return self._get_single_particle_df(df_dict, int(particle_name))
+            return self._get_one_particle_df(df_dict, int(particle_name))
 
         if df_dict is None:
             if hdf5_file_path is None or simu_name is None:
@@ -97,7 +97,7 @@ class ParticleTracker:
             ),
             leave=False
         ):
-            particle_df = self._get_single_particle_df(df_dict, int(pname))
+            particle_df = self._get_one_particle_df(df_dict, int(pname))
             if save_cache and not particle_df.empty:
                 assert hdf5_file_path is not None
                 assert simu_name is not None
@@ -196,7 +196,7 @@ class ParticleTracker:
             with ctx.Pool(
                 processes=min(batch_size, self.config.processes_count), maxtasksperchild=self.config.tasks_per_child
             ) as pool:
-                iterator = pool.imap(self._process_single_hdf5_for_particles_mp, tasks)
+                iterator = pool.imap(self._process_one_hdf5_file_for_particles_mp, tasks)
                 for _, result_dict in tqdm(
                     iterator, total=len(tasks), desc=f"Processing HDF5 batch in {simu_name}"
                 ):
@@ -206,7 +206,7 @@ class ParticleTracker:
                         if pdf is not None and not pdf.empty:
                             batch_particle_dfs.setdefault(int(pname), []).append(pdf)
 
-            # 5. Accumulate and persist per particle
+            # 5. Accumulate and persist per particle (on condition)
             # Get time range for this batch
             t_batch_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[0])
             t_batch_end = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[-1])
@@ -313,6 +313,7 @@ class ParticleTracker:
 
         logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
 
+    @log_time(logger)
     def save_every_particle_history_of_sim(
         self,
         simu_name: str,
@@ -410,7 +411,7 @@ class ParticleTracker:
             processes=self.config.processes_count, maxtasksperchild=self.config.tasks_per_child
         ) as pool:
             # imap returns result in order of input
-            iterator = pool.imap(self._process_single_hdf5_for_particle, tasks)
+            iterator = pool.imap(self._process_one_dfdict_for_particle, tasks)
             tqdm_iterator = tqdm(
                 iterator, total=len(tasks), desc=f"Tracking {particle_name} in {simu_name}"
             )
@@ -526,7 +527,7 @@ class ParticleTracker:
 
         return summary
 
-    def _get_single_particle_df(
+    def _get_one_particle_df(
         self, df_dict: Dict[str, pd.DataFrame], particle_name: int
     ) -> pd.DataFrame:
         """
@@ -589,6 +590,12 @@ class ParticleTracker:
                 f"Particle {particle_name} not found at any of TTOT: {df_dict['scalars']['TTOT'].unique()}"
             )
             return pd.DataFrame()
+
+    def _get_one_particle_df_mp(
+        self, args: Tuple[Dict[str, pd.DataFrame], int]
+    ) -> Tuple[int, pd.DataFrame]:
+        df_dict, particle_name = args
+        return particle_name, self._get_one_particle_df(df_dict, particle_name)
 
     def _save_particle_cache(
         self, particle_df: pd.DataFrame, particle_name: int, hdf5_file_path: str, simu_name: str
@@ -664,7 +671,7 @@ class ParticleTracker:
         except Exception as e:
             logger.warning(f"Failed to write progress file {progress_file}: {e}")
 
-    def _process_single_hdf5_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
+    def _process_one_dfdict_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
         """
         Worker function for parallel processing of HDF5 files
 
@@ -813,7 +820,15 @@ class ParticleTracker:
                 except Exception as e:
                     logger.error(f"Failed to save merged cache for particle {particle_name}: {e}")
 
-    def _merge_single_particle_cache(self, args: Tuple[str, int]) -> Tuple[int, bool]:
+    def _accumulate_particle_df_mp(
+        self, args: Tuple[str, int, pd.DataFrame, float, float, int]
+    ) -> None:
+        simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol = args
+        self._accumulate_particle_df(
+            simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol
+        )
+
+    def _merge_one_particle_cache(self, args: Tuple[str, int]) -> Tuple[int, bool]:
         """
         Worker function to merge cache files for a single particle.
 
@@ -939,7 +954,7 @@ class ParticleTracker:
         first_particle = particle_names[0]
         logger.info(f"Processing first particle {first_particle} to estimate memory usage")
 
-        _, success = self._merge_single_particle_cache((simu_name, first_particle))
+        _, success = self._merge_one_particle_cache((simu_name, first_particle))
 
         if not success:
             logger.warning(f"Failed to process first particle {first_particle}, continuing anyway")
@@ -991,7 +1006,7 @@ class ParticleTracker:
             ) as pool:
                 results = list(
                     tqdm(
-                        pool.imap(self._merge_single_particle_cache, tasks),
+                        pool.imap(self._merge_one_particle_cache, tasks),
                         total=len(tasks),
                         desc=f"Merging particle caches for {simu_name}",
                     )
@@ -1004,21 +1019,7 @@ class ParticleTracker:
 
         logger.info(f"Memory-aware cache merge completed for {simu_name}")
 
-    def _get_single_particle_df_mp(
-        self, args: Tuple[Dict[str, pd.DataFrame], int]
-    ) -> Tuple[int, pd.DataFrame]:
-        df_dict, particle_name = args
-        return particle_name, self._get_single_particle_df(df_dict, particle_name)
-
-    def _accumulate_particle_df_mp(
-        self, args: Tuple[str, int, pd.DataFrame, float, float, int]
-    ) -> None:
-        simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol = args
-        self._accumulate_particle_df(
-            simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol
-        )
-
-    def _process_single_hdf5_for_particles_mp(
+    def _process_one_hdf5_file_for_particles_mp(
         self, args: Tuple[str, str, Iterable[int]]
     ) -> Tuple[str, Dict[int, pd.DataFrame]]:
         hdf5_file_path, simu_name, particle_names = args
