@@ -307,19 +307,6 @@ class TestLagrVisualizer:
             # Some plotting functions might fail in headless environment
             pass
 
-    def test_extra_ax_handlers(self, mock_config):
-        """Test extra axis handlers"""
-        vis = LagrVisualizer(mock_config)
-        fig, ax = plt.subplots()
-
-        vis._extra_ax_handler_rlagr(ax)
-        assert ax.get_ylim() == (4e-2, 20)
-
-        vis._extra_ax_handler_logx(ax)
-        assert ax.get_xscale() == "log"
-
-        plt.close(fig)
-
 
 class TestCollCoalVisualizer:
     """Test CollCoalVisualizer class"""

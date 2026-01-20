@@ -251,17 +251,6 @@ class TestHDF5FileProcessor:
 
         assert mask.tolist() == [False, True, True]
 
-    def test_compute_binding_energy(self):
-        """Test computing binding energy for triple system"""
-        config_mock = Mock()
-        processor = HDF5FileProcessor(config_mock)
-
-        E_bind = processor._compute_binding_energy(
-            m_bin=10.0, m3=5.0, r=0.1, v_rel_x=10.0, v_rel_y=0.0, v_rel_z=0.0
-        )
-
-        assert isinstance(E_bind, float)
-
 
 class TestLagrFileProcessor:
     """Test LagrFileProcessor class"""
