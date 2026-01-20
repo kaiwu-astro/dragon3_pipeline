@@ -820,8 +820,7 @@ class ParticleTracker:
                 df_dict,
                 particle_name=particle_names,
                 hdf5_file_path=hdf5_file_path,
-                simu_name=simu_name,
-                save_cache=False,
+                simu_name=simu_name
             )
             return hdf5_file_path, result_dict
         except Exception as e:
