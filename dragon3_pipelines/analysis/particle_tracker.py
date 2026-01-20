@@ -196,7 +196,7 @@ class ParticleTracker:
             with ctx.Pool(
                 processes=min(batch_size, self.config.processes_count), maxtasksperchild=self.config.tasks_per_child
             ) as pool:
-                iterator = pool.imap(self._process_one_hdf5_file_for_particles_mp, tasks)
+                iterator = pool.imap(self._process_one_hdf5_file_for_particles_wrapper_mp, tasks)
                 for _, result_dict in tqdm(
                     iterator, total=len(tasks), desc=f"Processing HDF5 batch in {simu_name}"
                 ):
@@ -264,7 +264,7 @@ class ParticleTracker:
                         processes=self.config.processes_count,
                         maxtasksperchild=self.config.tasks_per_child,
                     ) as pool:
-                        iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
+                        iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
                         for _ in tqdm(
                             iterator,
                             total=len(tasks),
@@ -301,7 +301,7 @@ class ParticleTracker:
                     processes=self.config.processes_count,
                     maxtasksperchild=self.config.tasks_per_child,
                 ) as pool:
-                    iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
+                    iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
                     for _ in tqdm(
                         iterator,
                         total=len(tasks),
@@ -411,7 +411,7 @@ class ParticleTracker:
             processes=self.config.processes_count, maxtasksperchild=self.config.tasks_per_child
         ) as pool:
             # imap returns result in order of input
-            iterator = pool.imap(self._process_one_dfdict_for_particle, tasks)
+            iterator = pool.imap(self._process_one_dfdict_for_particle_wrapper_mp, tasks)
             tqdm_iterator = tqdm(
                 iterator, total=len(tasks), desc=f"Tracking {particle_name} in {simu_name}"
             )
@@ -591,7 +591,7 @@ class ParticleTracker:
             )
             return pd.DataFrame()
 
-    def _get_one_particle_df_mp(
+    def _get_one_particle_df_wrapper_mp(
         self, args: Tuple[Dict[str, pd.DataFrame], int]
     ) -> Tuple[int, pd.DataFrame]:
         df_dict, particle_name = args
@@ -671,7 +671,7 @@ class ParticleTracker:
         except Exception as e:
             logger.warning(f"Failed to write progress file {progress_file}: {e}")
 
-    def _process_one_dfdict_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
+    def _process_one_dfdict_for_particle_wrapper_mp(self, args: Tuple[str, int, str]) -> pd.DataFrame:
         """
         Worker function for parallel processing of HDF5 files
 
@@ -820,7 +820,7 @@ class ParticleTracker:
                 except Exception as e:
                     logger.error(f"Failed to save merged cache for particle {particle_name}: {e}")
 
-    def _accumulate_particle_df_mp(
+    def _accumulate_particle_df_wrapper_mp(
         self, args: Tuple[str, int, pd.DataFrame, float, float, int]
     ) -> None:
         simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol = args
@@ -1019,7 +1019,7 @@ class ParticleTracker:
 
         logger.info(f"Memory-aware cache merge completed for {simu_name}")
 
-    def _process_one_hdf5_file_for_particles_mp(
+    def _process_one_hdf5_file_for_particles_wrapper_mp(
         self, args: Tuple[str, str, Iterable[int]]
     ) -> Tuple[str, Dict[int, pd.DataFrame]]:
         hdf5_file_path, simu_name, particle_names = args
