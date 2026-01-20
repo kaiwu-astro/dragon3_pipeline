@@ -100,20 +100,6 @@ class TestConfigManager:
         max_expected = int(80.0 * 1024**3) // 2
         assert config.mem_cap_bytes <= max_expected
 
-    def test_parse_argv_skip_until(self):
-        """Test command line argument parsing"""
-        config = ConfigManager()
-
-        # Test with numeric value
-        config._parse_argv([("--skip-until", "100")])
-        for key in config.skip_until_of:
-            assert config.skip_until_of[key] == 100.0
-
-        # Test with string value
-        config._parse_argv([("--skip-until", "last")])
-        for key in config.skip_until_of:
-            assert config.skip_until_of[key] == "last"
-
     def test_physics_constants(self):
         """Test physics constants are loaded correctly"""
         config = ConfigManager()

@@ -90,11 +90,14 @@ class ParticleTracker:
             return {}
 
         result_dict = {}
+        desc = (
+            f"Getting particle df from {os.path.basename(hdf5_file_path)}"
+            if hdf5_file_path is not None
+            else "Getting particle df"
+        )
         for pname in tqdm(
             particle_names,
-            desc=(
-                f"Getting particle df from {os.path.basename(hdf5_file_path)}"
-            ),
+            desc=desc,
             leave=False
         ):
             particle_df = self._get_one_particle_df(df_dict, int(pname))
