@@ -666,6 +666,7 @@ class ParticleTracker:
         t_start: float,
         t_end: float,
         n_cache_tol: int,
+        use_miltithread: bool = True
     ) -> None:
         """
         Accumulate particle DataFrame using inode-based merge strategy.
@@ -680,6 +681,7 @@ class ParticleTracker:
             t_start: Start time of the batch being processed
             t_end: End time of the batch being processed
             n_cache_tol: Threshold for number of cache files before merging
+            use_miltithread: Whether to use multithreading when reading feather files
         """
         if new_particle_df is None or new_particle_df.empty:
             return
@@ -742,7 +744,7 @@ class ParticleTracker:
             # Read all individual cache files
             for cache_file in individual_cache_files:
                 try:
-                    df = pd.read_feather(cache_file)
+                    df = pd.read_feather(cache_file, use_threads=use_miltithread)
                     if not df.empty:
                         dfs_to_merge.append(df)
                 except Exception as e:
@@ -751,7 +753,7 @@ class ParticleTracker:
             # Read existing merged file if present
             if merged_cache_files:
                 try:
-                    old_merged_df = pd.read_feather(merged_cache_files[0])
+                    old_merged_df = pd.read_feather(merged_cache_files[0], use_threads=use_miltithread)
                     if not old_merged_df.empty:
                         dfs_to_merge.append(old_merged_df)
                 except Exception as e:
@@ -807,8 +809,9 @@ class ParticleTracker:
     ) -> None:
         simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol = args
         self._accumulate_particle_df(
-            simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol
-        )
+            simu_name, particle_name, new_particle_df, t_start, t_end, n_cache_tol, 
+            use_miltithread=False
+        ) # mp时手动指定关闭read_feather的多线程，避免多进程+多线程导致爆线程数
 
     def _process_one_hdf5_file_for_particles_wrapper_mp(
         self, args: Tuple[str, str, Iterable[int]]
