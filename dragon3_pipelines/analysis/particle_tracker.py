@@ -697,6 +697,23 @@ class ParticleTracker:
             reverse=True,
         )
 
+        # 保险：进程被杀可能导致一些文件已经合并，一些没有
+        # 若已有 merged 文件的 until 时间戳 > 当前片段 t_end，则视为已合并，清理片段文件后返回
+        if merged_cache_files:
+            latest_merged = merged_cache_files[0]
+            base = os.path.basename(latest_merged)
+            # {particle_name}_history_until_{max_ttot:.2f}.df.feather
+            until_str = base.split("_history_until_")[1].split(".df.feather")[0]
+            latest_until = float(until_str)
+
+            if latest_until is not None and latest_until > t_end:
+                for cache_file in individual_cache_files:
+                    try:
+                        os.remove(cache_file)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete cache file {cache_file}: {e}")
+                return
+
         cache_file_count = len(individual_cache_files)
 
         if cache_file_count < n_cache_tol:
