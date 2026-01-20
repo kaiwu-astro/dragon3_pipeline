@@ -90,19 +90,12 @@ class ParticleTracker:
             return {}
 
         result_dict = {}
-        _proc = multiprocessing.current_process()
-        _in_mp = _proc.name != "MainProcess"
-        _pos = (_proc._identity[0] - 1) if _in_mp and _proc._identity else 0
-        if hdf5_file_path is not None:
-            _tqdm_kwargs = {"desc": f"Getting particle df from {os.path.basename(hdf5_file_path)}"}
-        else:
-            _tqdm_kwargs = {"desc": "Getting particle df"}
-        if _in_mp:
-            _tqdm_kwargs.update({"position": _pos, "leave": True})
-
         for pname in tqdm(
             particle_names,
-            **_tqdm_kwargs,
+            desc=(
+                f"Getting particle df from {os.path.basename(hdf5_file_path)}"
+            ),
+            leave=False
         ):
             particle_df = self._get_single_particle_df(df_dict, int(pname))
             if save_cache and not particle_df.empty:
@@ -861,10 +854,13 @@ class ParticleTracker:
         )
 
         # 4. Batch process HDF5 files
+        in_mem_particle_dfs: Dict[int, list] = {}
+        in_mem_time_start: Optional[float] = None
+        last_batch_end: Optional[float] = None
+
         for start in tqdm(
             range(0, len(files_to_process), batch_size),
-            total=len(files_to_process),
-            desc=f"Processing all HDF5 files in {simu_name}",
+            desc=f"Processing all HDF5 batches {simu_name}",
         ):
             batch_files = files_to_process[start : start + batch_size]
             batch_particle_dfs: Dict[int, list] = {}
@@ -873,7 +869,7 @@ class ParticleTracker:
             tasks = [(fpath, simu_name, particle_names) for fpath in batch_files]
 
             with ctx.Pool(
-                processes=batch_size, maxtasksperchild=self.config.tasks_per_child
+                processes=min(batch_size, self.config.processes_count), maxtasksperchild=self.config.tasks_per_child
             ) as pool:
                 iterator = pool.imap(self._process_single_hdf5_for_particles_mp, tasks)
                 for _, result_dict in tqdm(
@@ -887,10 +883,81 @@ class ParticleTracker:
 
             # 5. Accumulate and persist per particle
             # Get time range for this batch
-            t_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[0])
-            t_end = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[-1])
+            t_batch_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[0])
+            t_batch_end = self.hdf5_file_processor.get_hdf5_file_time_from_filename(batch_files[-1])
+            last_batch_end = t_batch_end
 
-            ctx = multiprocessing.get_context("forkserver")
+            # Decide whether to keep in memory or accumulate
+            def _estimate_in_mem_bytes(pdict: Dict[int, list]) -> int:
+                for _, dfs in pdict.items():
+                    if dfs:
+                        return int(dfs[0].memory_usage(deep=True).sum()) * sum(
+                            len(v) for v in pdict.values()
+                        )
+                return 0
+
+            # Merge dict
+            tentative_in_mem = {}
+            if in_mem_particle_dfs:
+                tentative_in_mem = {k: list(v) for k, v in in_mem_particle_dfs.items()}
+            for pname, dfs in batch_particle_dfs.items():
+                if dfs:
+                    tentative_in_mem.setdefault(int(pname), []).extend(dfs)
+
+            est_bytes = _estimate_in_mem_bytes(tentative_in_mem)
+            if est_bytes <= self.config.mem_cap_bytes / 4:
+                if not in_mem_particle_dfs:
+                    in_mem_time_start = t_batch_start
+                in_mem_particle_dfs = tentative_in_mem
+                continue
+            else: # write to file (mem threshold exceeded)
+                t_start = in_mem_time_start if in_mem_time_start is not None else t_batch_start
+                t_end = t_batch_end
+
+                tasks = [
+                    (
+                        simu_name,
+                        int(pname),
+                        pd.concat(dfs, ignore_index=True),
+                        t_start,
+                        t_end,
+                        n_cache_tol,
+                    )
+                    for pname, dfs in tentative_in_mem.items()
+                    if dfs
+                ]
+
+                cache_base = self.config.particle_df_cache_dir_of[simu_name]
+                particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
+                os.makedirs(particle_dir_0, exist_ok=True)
+                cache_file_count_0 = len(glob(
+                    os.path.join(particle_dir_0, f"{particle_names[0]}_df_*.df.feather")
+                ))
+
+                if tasks:
+                    with ctx.Pool(
+                        processes=self.config.processes_count,
+                        maxtasksperchild=self.config.tasks_per_child,
+                    ) as pool:
+                        iterator = pool.imap(self._accumulate_particle_df_mp, tasks)
+                        for _ in tqdm(
+                            iterator,
+                            total=len(tasks),
+                            desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
+                            f"Accumulating particle caches in {simu_name}",
+                        ):
+                            pass
+
+                in_mem_particle_dfs = {}
+                in_mem_time_start = None
+                # Update progress after accumulate
+                self._write_progress_file(simu_name, t_end)
+
+        # After looping over all hdf5s, flush remaining in-memory data
+        if in_mem_particle_dfs and last_batch_end is not None:
+            t_start = in_mem_time_start if in_mem_time_start is not None else last_batch_end
+            t_end = last_batch_end
+
             tasks = [
                 (
                     simu_name,
@@ -898,18 +965,11 @@ class ParticleTracker:
                     pd.concat(dfs, ignore_index=True),
                     t_start,
                     t_end,
-                    n_cache_tol,
+                    1, # n_cache_tol set to 1 to force merge at the end
                 )
-                for pname, dfs in batch_particle_dfs.items()
+                for pname, dfs in in_mem_particle_dfs.items()
                 if dfs
             ]
-
-            cache_base = self.config.particle_df_cache_dir_of[simu_name]
-            particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
-            os.makedirs(particle_dir_0, exist_ok=True)
-            cache_file_count_0 = len(glob(
-                os.path.join(particle_dir_0, f"{particle_names[0]}_df_*.df.feather")
-            ))
 
             if tasks:
                 with ctx.Pool(
@@ -920,15 +980,11 @@ class ParticleTracker:
                     for _ in tqdm(
                         iterator,
                         total=len(tasks),
-                        desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
-                        f"Accumulating particle caches in {simu_name}",
+                        desc=f"Accumulating particle caches in {simu_name}",
                     ):
                         pass
-            # 6. Update progress file
-            last_hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(
-                batch_files[-1]
-            )
-            self._write_progress_file(simu_name, last_hdf5_time)
+
+            self._write_progress_file(simu_name, t_end)
 
         logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
 
