@@ -90,11 +90,14 @@ class ParticleTracker:
             return {}
 
         result_dict = {}
+        desc = (
+            f"Getting particle df from {os.path.basename(hdf5_file_path)}"
+            if hdf5_file_path is not None
+            else "Getting particle df"
+        )
         for pname in tqdm(
             particle_names,
-            desc=(
-                f"Getting particle df from {os.path.basename(hdf5_file_path)}"
-            ),
+            desc=desc,
             leave=False
         ):
             particle_df = self._get_one_particle_df(df_dict, int(pname))
@@ -670,6 +673,20 @@ class ParticleTracker:
             logger.debug(f"Updated progress file to {hdf5_time}")
         except Exception as e:
             logger.warning(f"Failed to write progress file {progress_file}: {e}")
+
+    def _process_single_hdf5_for_particle(self, args: Tuple[str, int, str]) -> pd.DataFrame:
+        """
+        Worker function for parallel processing of HDF5 files
+        
+        Backward compatibility alias for _process_one_dfdict_for_particle_wrapper_mp
+
+        Args:
+            args: Tuple of (hdf5_file_path, particle_name, simu_name)
+
+        Returns:
+            DataFrame with particle data from all snapshots in this HDF5 file
+        """
+        return self._process_one_dfdict_for_particle_wrapper_mp(args)
 
     def _process_one_dfdict_for_particle_wrapper_mp(self, args: Tuple[str, int, str]) -> pd.DataFrame:
         """
