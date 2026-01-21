@@ -181,7 +181,7 @@ class ParticleTracker:
         if per_file_bytes <= 0:
             batch_size = 1
         else:
-            batch_size = max(1, int(mem_cap_bytes // per_file_bytes))
+            batch_size = max(1, int((mem_cap_bytes * 3 / 4) // per_file_bytes)) # 留1/4缓存particle_df，避免疯狂写盘
 
         batch_size = min(batch_size, len(files_to_process), self.config.processes_count)
         logger.info(
