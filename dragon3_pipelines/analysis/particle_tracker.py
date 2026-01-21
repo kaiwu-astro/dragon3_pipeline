@@ -652,6 +652,10 @@ class ParticleTracker:
         cache_base = self.config.particle_df_cache_dir_of[simu_name]
         progress_dict: Dict[int, float] = {}
 
+        # Regex pattern for extracting timestamp from filename
+        import re
+        timestamp_pattern = re.compile(r"_history_until_([0-9.]+)\.df\.feather$")
+
         for pname in particle_names:
             particle_dir = os.path.join(cache_base, str(pname))
 
@@ -659,37 +663,51 @@ class ParticleTracker:
                 progress_dict[pname] = -1.0
                 continue
 
-            # Find all history_until files for this particle
-            pattern = os.path.join(particle_dir, f"{pname}_history_until_*.df.feather")
-            until_files = glob(pattern)
+            # Find all history_until files for this particle using os.listdir
+            prefix = f"{pname}_history_until_"
+            suffix = ".df.feather"
+            try:
+                files_in_dir = os.listdir(particle_dir)
+            except OSError as e:
+                logger.warning(f"Failed to list directory {particle_dir}: {e}")
+                progress_dict[pname] = -1.0
+                continue
+
+            until_files = [
+                f for f in files_in_dir
+                if f.startswith(prefix) and f.endswith(suffix)
+            ]
 
             if not until_files:
                 progress_dict[pname] = -1.0
                 continue
 
-            # Parse timestamps from filenames
+            # Parse timestamps from filenames using regex
             timestamps = []
-            for fpath in until_files:
-                base = os.path.basename(fpath)
-                # {particle_name}_history_until_{max_ttot:.2f}.df.feather
-                try:
-                    until_str = base.split("_history_until_")[1].split(".df.feather")[0]
-                    timestamps.append(float(until_str))
-                except (IndexError, ValueError) as e:
-                    logger.warning(f"Failed to parse timestamp from {fpath}: {e}")
+            for filename in until_files:
+                match = timestamp_pattern.search(filename)
+                if match:
+                    try:
+                        timestamps.append(float(match.group(1)))
+                    except ValueError as e:
+                        logger.warning(f"Failed to parse timestamp from {filename}: {e}")
+                else:
+                    logger.warning(f"Failed to match timestamp pattern in {filename}")
 
             if not timestamps:
                 progress_dict[pname] = -1.0
                 continue
 
+            max_timestamp = max(timestamps)
+
             # Warn if multiple until files exist
             if len(timestamps) > 1:
                 logger.warning(
                     f"Particle {pname} has {len(timestamps)} history_until files. "
-                    f"Using max timestamp: {max(timestamps):.2f}"
+                    f"Using max timestamp: {max_timestamp:.2f}"
                 )
 
-            progress_dict[pname] = max(timestamps)
+            progress_dict[pname] = max_timestamp
 
         return progress_dict
 
