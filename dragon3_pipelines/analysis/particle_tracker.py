@@ -219,7 +219,8 @@ class ParticleTracker:
             ) as pool:
                 iterator = pool.imap(self._process_one_hdf5_file_for_particles_wrapper_mp, tasks)
                 for _, result_dict in tqdm(
-                    iterator, total=len(tasks), desc=f"Processing HDF5 batch in {simu_name}"
+                    iterator, total=len(tasks),
+                    desc=f"Processing HDF5 batch number {start // batch_size + 1} in {simu_name}"
                 ):
                     if not result_dict:
                         continue
