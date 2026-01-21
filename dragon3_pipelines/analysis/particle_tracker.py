@@ -254,18 +254,28 @@ class ParticleTracker:
                 ))
 
                 if tasks:
-                    with ctx.Pool(
-                        processes=self.config.processes_count,
-                        maxtasksperchild=self.config.tasks_per_child,
-                    ) as pool:
-                        iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
-                        for _ in tqdm(
-                            iterator,
-                            total=len(tasks),
-                            desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
-                            f"Accumulating particle caches in {simu_name}",
-                        ):
-                            pass
+                    # 并行，不知为何容易出问题，合并卡住不动
+                    # with ctx.Pool(
+                    #     processes=self.config.processes_count,
+                    #     maxtasksperchild=self.config.tasks_per_child,
+                    # ) as pool:
+                    #     iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
+                    #     for _ in tqdm(
+                    #         iterator,
+                    #         total=len(tasks),
+                    #         desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
+                    #         f"Accumulating particle caches in {simu_name}",
+                    #     ):
+                    #         pass
+                    # 改为串行
+                    iterator = map(self._accumulate_particle_df_wrapper_mp, tasks)
+                    for _ in tqdm(
+                        iterator,
+                        total=len(tasks),
+                        desc=f"Writing particle caches in {simu_name}" if cache_file_count_0 < n_cache_tol else
+                        f"Accumulating particle caches in {simu_name}",
+                    ):
+                        pass
 
                 in_mem_particle_dfs = {}
                 in_mem_time_start = None
@@ -291,17 +301,25 @@ class ParticleTracker:
             ]
 
             if tasks:
-                with ctx.Pool(
-                    processes=self.config.processes_count,
-                    maxtasksperchild=self.config.tasks_per_child,
-                ) as pool:
-                    iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
-                    for _ in tqdm(
-                        iterator,
-                        total=len(tasks),
-                        desc=f"Accumulating particle caches in {simu_name}",
-                    ):
-                        pass
+                # with ctx.Pool(
+                #     processes=self.config.processes_count,
+                #     maxtasksperchild=self.config.tasks_per_child,
+                # ) as pool:
+                #     iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
+                #     for _ in tqdm(
+                #         iterator,
+                #         total=len(tasks),
+                #         desc=f"Finally accumulating particle caches in {simu_name}",
+                #     ):
+                #         pass
+                # 同样改为串行
+                iterator = map(self._accumulate_particle_df_wrapper_mp, tasks)
+                for _ in tqdm(
+                    iterator,
+                    total=len(tasks),
+                    desc=f"Finally accumulating particle caches in {simu_name}",
+                ):
+                    pass
 
             self._write_progress_file(simu_name, t_end)
 
