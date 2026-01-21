@@ -3,7 +3,8 @@
 import logging
 import multiprocessing
 import os
-from typing import Any, Dict, Optional, Tuple, Union, Iterable
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple, Union, Iterable
 
 import numpy as np
 import pandas as pd
@@ -19,6 +20,23 @@ from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class HDF5ParticleTask:
+    """Task parameters for processing particles from an HDF5 file.
+
+    Attributes:
+        hdf5_file_path: Path to the HDF5 file
+        simu_name: Simulation name
+        particle_names: List of particle names to process
+        progress_dict: Dictionary mapping particle_name -> last processed time
+    """
+
+    hdf5_file_path: str
+    simu_name: str
+    particle_names: List[int]
+    progress_dict: Dict[int, float]
 
 
 class ParticleTracker:
@@ -128,17 +146,18 @@ class ParticleTracker:
         # 1. Get all HDF5 files
         hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
 
-        # 2. Read progress file to skip already-processed files
-        last_processed_time = self._read_progress_file(simu_name)
+        # 2. Build progress dict from individual particle history files
+        progress_dict = self._build_progress_dict(simu_name, particle_names)
+        min_progress_time = min(progress_dict.values()) if progress_dict else -1.0
         files_to_process = [
             f
             for f in hdf5_files
-            if self.hdf5_file_processor.get_hdf5_file_time_from_filename(f) > last_processed_time
+            if self.hdf5_file_processor.get_hdf5_file_time_from_filename(f) > min_progress_time
         ]
 
         if not files_to_process:
             logger.info(f"No new HDF5 files to process for simulation {simu_name}")
-            logger.info(f"Last processed time: {last_processed_time}")
+            logger.info(f"Min progress time across particles: {min_progress_time}")
             return
 
         logger.info(
@@ -185,7 +204,15 @@ class ParticleTracker:
             batch_particle_dfs: Dict[int, list] = {}
 
             ctx = multiprocessing.get_context("forkserver")
-            tasks = [(fpath, simu_name, particle_names) for fpath in batch_files]
+            tasks = [
+                HDF5ParticleTask(
+                    hdf5_file_path=fpath,
+                    simu_name=simu_name,
+                    particle_names=particle_names,
+                    progress_dict=progress_dict,
+                )
+                for fpath in batch_files
+            ]
 
             with ctx.Pool(
                 processes=min(batch_size, self.config.processes_count), maxtasksperchild=self.config.tasks_per_child
@@ -279,8 +306,6 @@ class ParticleTracker:
 
                 in_mem_particle_dfs = {}
                 in_mem_time_start = None
-                # Update progress after accumulate
-                self._write_progress_file(simu_name, t_end)
 
         # After looping over all hdf5s, flush remaining in-memory data
         if in_mem_particle_dfs and last_batch_end is not None:
@@ -320,8 +345,6 @@ class ParticleTracker:
                     desc=f"Finally accumulating particle caches in {simu_name}",
                 ):
                     pass
-
-            self._write_progress_file(simu_name, t_end)
 
         logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
 
@@ -609,50 +632,66 @@ class ParticleTracker:
         df_dict, particle_name = args
         return particle_name, self._get_one_particle_df(df_dict, particle_name)
 
-    def _read_progress_file(self, simu_name: str) -> float:
+    def _build_progress_dict(
+        self, simu_name: str, particle_names: List[int]
+    ) -> Dict[int, float]:
         """
-        Read the progress file to get the last processed HDF5 time
+        Build a progress dictionary by scanning each particle's history_until files.
+
+        For each particle, looks for {particle_name}_history_until_*.df.feather files
+        and extracts the timestamp from the filename.
 
         Args:
             simu_name: Simulation name
+            particle_names: List of particle names to check
 
         Returns:
-            Last processed HDF5 time (or -1.0 if no progress file exists)
+            Dictionary mapping particle_name -> last processed time.
+            Returns -1.0 for particles with no history file or missing directory.
         """
         cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        progress_file = os.path.join(cache_base, "_progress.txt")
+        progress_dict: Dict[int, float] = {}
 
-        if not os.path.exists(progress_file):
-            return -1.0
+        for pname in particle_names:
+            particle_dir = os.path.join(cache_base, str(pname))
 
-        try:
-            with open(progress_file, "r") as f:
-                content = f.read().strip()
-                if content:
-                    return float(content)
-        except Exception as e:
-            logger.warning(f"Failed to read progress file {progress_file}: {e}")
+            if not os.path.exists(particle_dir):
+                progress_dict[pname] = -1.0
+                continue
 
-        return -1.0
+            # Find all history_until files for this particle
+            pattern = os.path.join(particle_dir, f"{pname}_history_until_*.df.feather")
+            until_files = glob(pattern)
 
-    def _write_progress_file(self, simu_name: str, hdf5_time: float) -> None:
-        """
-        Write the progress file with the last processed HDF5 time
+            if not until_files:
+                progress_dict[pname] = -1.0
+                continue
 
-        Args:
-            simu_name: Simulation name
-            hdf5_time: HDF5 file time to record
-        """
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
-        os.makedirs(cache_base, exist_ok=True)
-        progress_file = os.path.join(cache_base, "_progress.txt")
+            # Parse timestamps from filenames
+            timestamps = []
+            for fpath in until_files:
+                base = os.path.basename(fpath)
+                # {particle_name}_history_until_{max_ttot:.2f}.df.feather
+                try:
+                    until_str = base.split("_history_until_")[1].split(".df.feather")[0]
+                    timestamps.append(float(until_str))
+                except (IndexError, ValueError) as e:
+                    logger.warning(f"Failed to parse timestamp from {fpath}: {e}")
 
-        try:
-            with open(progress_file, "w") as f:
-                f.write(f"{hdf5_time}\n")
-            logger.debug(f"Updated progress file to {hdf5_time}")
-        except Exception as e:
-            logger.warning(f"Failed to write progress file {progress_file}: {e}")
+            if not timestamps:
+                progress_dict[pname] = -1.0
+                continue
+
+            # Warn if multiple until files exist
+            if len(timestamps) > 1:
+                logger.warning(
+                    f"Particle {pname} has {len(timestamps)} history_until files. "
+                    f"Using max timestamp: {max(timestamps):.2f}"
+                )
+
+            progress_dict[pname] = max(timestamps)
+
+        return progress_dict
 
     def _process_one_dfdict_for_particle_wrapper_mp(self, args: Tuple[str, int, str]) -> pd.DataFrame:
         """
@@ -718,7 +757,7 @@ class ParticleTracker:
         )
 
         # 保险：进程被杀可能导致一些文件已经合并，一些没有
-        # 若已有 history_until 文件的 until 时间戳 > 当前片段 t_end，则视为已合并，清理片段文件后返回
+        # 若已有 history_until 文件的 until 时间戳 >= 当前片段 t_start，则视为已合并，清理片段文件后返回
         if merged_cache_files:
             latest_merged = merged_cache_files[0]
             base = os.path.basename(latest_merged)
@@ -726,7 +765,7 @@ class ParticleTracker:
             until_str = base.split("_history_until_")[1].split(".df.feather")[0]
             latest_until = float(until_str)
 
-            if latest_until is not None and latest_until > t_end:
+            if latest_until is not None and latest_until >= t_start:
                 for cache_file in individual_cache_files:
                     try:
                         os.remove(cache_file)
@@ -832,14 +871,42 @@ class ParticleTracker:
         ) # mp时手动指定关闭read_feather的多线程，避免多进程+多线程导致爆线程数
 
     def _process_one_hdf5_file_for_particles_wrapper_mp(
-        self, args: Tuple[str, str, Iterable[int]]
+        self, task: HDF5ParticleTask
     ) -> Tuple[str, Dict[int, pd.DataFrame]]:
-        hdf5_file_path, simu_name, particle_names = args
+        """
+        Worker function for parallel processing of particles from an HDF5 file.
+
+        Filters out particles that have already been processed beyond this HDF5 file's time.
+
+        Args:
+            task: HDF5ParticleTask containing file path, simulation name,
+                  particle names, and progress dict
+
+        Returns:
+            Tuple of (hdf5_file_path, dict mapping particle_name -> DataFrame)
+        """
+        hdf5_file_path = task.hdf5_file_path
+        simu_name = task.simu_name
+        particle_names = task.particle_names
+        progress_dict = task.progress_dict
+
         try:
+            # Get the time of this HDF5 file
+            hdf5_time = self.hdf5_file_processor.get_hdf5_file_time_from_filename(hdf5_file_path)
+
+            # Filter particles: skip those already processed beyond this HDF5 file's time
+            particles_to_process = [
+                pname for pname in particle_names
+                if hdf5_time > progress_dict.get(pname, -1.0)
+            ]
+
+            if not particles_to_process:
+                return hdf5_file_path, {}
+
             df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
             result_dict = self.get_particle_df_from_hdf5_file(
                 df_dict,
-                particle_name=particle_names,
+                particle_name=particles_to_process,
                 hdf5_file_path=hdf5_file_path,
                 simu_name=simu_name
             )

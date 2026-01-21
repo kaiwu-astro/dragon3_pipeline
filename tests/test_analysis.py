@@ -246,6 +246,71 @@ class TestParticleTracker:
         assert list(result["TTOT"]) == [1.0, 2.0]
         assert list(result["Name"]) == [3000, 3000]
 
+    def test_build_progress_dict_no_files(self, particle_tracker, mock_config, tmp_path):
+        """Test _build_progress_dict with no existing files"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        result = particle_tracker._build_progress_dict("test_simu", [1000, 2000, 3000])
+
+        assert result == {1000: -1.0, 2000: -1.0, 3000: -1.0}
+
+    def test_build_progress_dict_with_history_files(self, particle_tracker, mock_config, tmp_path):
+        """Test _build_progress_dict with existing history files"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        # Create history files for particles
+        particle_1_dir = tmp_path / "1000"
+        particle_1_dir.mkdir()
+        (particle_1_dir / "1000_history_until_5.00.df.feather").touch()
+
+        particle_2_dir = tmp_path / "2000"
+        particle_2_dir.mkdir()
+        (particle_2_dir / "2000_history_until_10.50.df.feather").touch()
+
+        result = particle_tracker._build_progress_dict("test_simu", [1000, 2000, 3000])
+
+        assert result[1000] == 5.0
+        assert result[2000] == 10.5
+        assert result[3000] == -1.0  # No file for this particle
+
+    def test_build_progress_dict_multiple_files_uses_max(
+        self, particle_tracker, mock_config, tmp_path
+    ):
+        """Test _build_progress_dict with multiple history files takes max timestamp"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        # Create multiple history files for one particle
+        particle_dir = tmp_path / "1000"
+        particle_dir.mkdir()
+        (particle_dir / "1000_history_until_3.00.df.feather").touch()
+        (particle_dir / "1000_history_until_7.50.df.feather").touch()
+        (particle_dir / "1000_history_until_5.00.df.feather").touch()
+
+        result = particle_tracker._build_progress_dict("test_simu", [1000])
+
+        # Should use max timestamp (7.50)
+        assert result[1000] == 7.5
+
+
+class TestHDF5ParticleTask:
+    """Tests for HDF5ParticleTask dataclass"""
+
+    def test_dataclass_creation(self):
+        """Test HDF5ParticleTask dataclass can be created"""
+        from dragon3_pipelines.analysis.particle_tracker import HDF5ParticleTask
+
+        task = HDF5ParticleTask(
+            hdf5_file_path="/path/to/file.h5part",
+            simu_name="test_simu",
+            particle_names=[1000, 2000, 3000],
+            progress_dict={1000: 5.0, 2000: 10.0, 3000: -1.0},
+        )
+
+        assert task.hdf5_file_path == "/path/to/file.h5part"
+        assert task.simu_name == "test_simu"
+        assert task.particle_names == [1000, 2000, 3000]
+        assert task.progress_dict == {1000: 5.0, 2000: 10.0, 3000: -1.0}
+
 
 class TestPhysics:
     """Tests for physics functions"""
