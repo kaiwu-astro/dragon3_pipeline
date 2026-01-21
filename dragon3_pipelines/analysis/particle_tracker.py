@@ -103,15 +103,16 @@ class ParticleTracker:
             return {}
 
         result_dict = {}
-        desc = (
-            f"Getting particle df from {os.path.basename(hdf5_file_path)}"
-            if hdf5_file_path is not None
-            else "Getting particle df"
-        )
-        for pname in track(
-            particle_names,
-            description=desc,
-        ):
+        # desc = (
+        #     f"Getting particle df from {os.path.basename(hdf5_file_path)}"
+        #     if hdf5_file_path is not None
+        #     else "Getting particle df"
+        # )
+        # for pname in track(
+        #     particle_names,
+        #     description=desc,
+        # ):
+        for pname in particle_names:
             particle_df = self._get_one_particle_df(df_dict, int(pname))
             result_dict[int(pname)] = particle_df
 
