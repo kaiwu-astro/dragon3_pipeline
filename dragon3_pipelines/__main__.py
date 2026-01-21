@@ -15,7 +15,7 @@ import functools
 import multiprocessing
 
 import matplotlib.pyplot as plt
-from tqdm.auto import tqdm
+from rich.progress import Progress
 
 from dragon3_pipelines.config import ConfigManager
 from dragon3_pipelines.io import HDF5FileProcessor, LagrFileProcessor
@@ -180,13 +180,10 @@ class SimulationPlotter:
             with ctx.Pool(
                 processes=self.config.processes_count, maxtasksperchild=self.config.tasks_per_child
             ) as pool:
-                list(
-                    tqdm(
-                        pool.imap(process_file_partial, hdf5_files),
-                        total=len(hdf5_files),
-                        desc=f"{simu_name} HDF5 Files",
-                    )
-                )
+                with Progress() as progress:
+                    task = progress.add_task(f"{simu_name} HDF5 Files", total=len(hdf5_files))
+                    for _ in pool.imap(process_file_partial, hdf5_files):
+                        progress.advance(task)
 
 
 def main() -> int:
@@ -196,19 +193,15 @@ def main() -> int:
         opts, args = getopt.getopt(sys.argv[1:], "k:", long_options)
         if "--debug" in dict(opts):
             logging.basicConfig(
-                level=logging.DEBUG,
-                format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+                level=logging.DEBUG, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
             )
         else:
             logging.basicConfig(
-                level=logging.INFO,
-                format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+                level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
             )
     except getopt.GetoptError as err:
         print(err)
         sys.exit(2)
-
-
 
     config = ConfigManager(opts=opts)
 
