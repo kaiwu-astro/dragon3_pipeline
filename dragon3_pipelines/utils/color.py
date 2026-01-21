@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from typing import Union, Optional
 from scipy.interpolate import interp1d
-from tqdm.auto import tqdm
+from rich.progress import track
 
 try:
     from colour.colorimetry import SpectralDistribution, msds_to_XYZ, planck_law
@@ -61,7 +61,7 @@ class BlackbodyColorConverter:
         results = []
 
         # Calculate RGB for each temperature
-        for temp in tqdm(temperatures):
+        for temp in track(temperatures, description="Computing RGB values..."):
             # Calculate blackbody radiation spectrum
             spd_data = {}
             for wavelength in wavelengths:
