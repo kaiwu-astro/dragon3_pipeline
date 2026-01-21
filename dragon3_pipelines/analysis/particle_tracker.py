@@ -648,7 +648,9 @@ class ParticleTracker:
         Build a progress dictionary by scanning each particle's history_until files.
 
         For each particle, looks for {particle_name}_history_until_*.df.feather files
-        and extracts the timestamp from the filename.
+        and extracts the timestamp from the filename. If not found, looks for
+        {particle_name}_df_{t_start}_to_{t_end}.df.feather files and uses the max t_end
+        if at least one file has t_start=0.0.
 
         Args:
             simu_name: Simulation name
@@ -665,6 +667,8 @@ class ParticleTracker:
         import re
 
         timestamp_pattern = re.compile(r"_history_until_([0-9.]+)\.df\.feather$")
+        # Pattern for individual cache files: {particle_name}_df_{t_start}_to_{t_end}.df.feather
+        individual_pattern = re.compile(r"_df_([0-9.]+)_to_([0-9.]+)\.df\.feather$")
 
         for pname in particle_names:
             particle_dir = os.path.join(cache_base, str(pname))
@@ -685,36 +689,80 @@ class ParticleTracker:
 
             until_files = [f for f in files_in_dir if f.startswith(prefix) and f.endswith(suffix)]
 
-            if not until_files:
+            if until_files:
+                # Parse timestamps from filenames using regex
+                timestamps = []
+                for filename in until_files:
+                    match = timestamp_pattern.search(filename)
+                    if match:
+                        try:
+                            timestamps.append(float(match.group(1)))
+                        except ValueError as e:
+                            logger.warning(f"Failed to parse timestamp from {filename}: {e}")
+                    else:
+                        logger.warning(f"Failed to match timestamp pattern in {filename}")
+
+                if timestamps:
+                    max_timestamp = max(timestamps)
+
+                    # Warn if multiple until files exist
+                    if len(timestamps) > 1:
+                        logger.warning(
+                            f"Particle {pname} has {len(timestamps)} history_until files. "
+                            f"Using max timestamp: {max_timestamp:.2f}"
+                        )
+
+                    progress_dict[pname] = max_timestamp
+                    continue
+
+            # Fallback: look for individual cache files {particle_name}_df_{t_start}_to_{t_end}.df.feather
+            individual_prefix = f"{pname}_df_"
+            individual_suffix = ".df.feather"
+            individual_files = [
+                f for f in files_in_dir 
+                if f.startswith(individual_prefix) and f.endswith(individual_suffix)
+            ]
+
+            if not individual_files:
                 progress_dict[pname] = -1.0
                 continue
 
-            # Parse timestamps from filenames using regex
-            timestamps = []
-            for filename in until_files:
-                match = timestamp_pattern.search(filename)
+            # Parse t_start and t_end from each file
+            t_starts = []
+            t_ends = []
+            for filename in individual_files:
+                match = individual_pattern.search(filename)
                 if match:
                     try:
-                        timestamps.append(float(match.group(1)))
+                        t_start = float(match.group(1))
+                        t_end = float(match.group(2))
+                        t_starts.append(t_start)
+                        t_ends.append(t_end)
                     except ValueError as e:
-                        logger.warning(f"Failed to parse timestamp from {filename}: {e}")
+                        logger.warning(f"Failed to parse timestamps from {filename}: {e}")
                 else:
-                    logger.warning(f"Failed to match timestamp pattern in {filename}")
+                    logger.warning(f"Failed to match individual pattern in {filename}")
 
-            if not timestamps:
+            if not t_starts:
                 progress_dict[pname] = -1.0
                 continue
 
-            max_timestamp = max(timestamps)
-
-            # Warn if multiple until files exist
-            if len(timestamps) > 1:
-                logger.warning(
-                    f"Particle {pname} has {len(timestamps)} history_until files. "
-                    f"Using max timestamp: {max_timestamp:.2f}"
+            # Check if at least one file has t_start == 0.0
+            has_zero_start = any(abs(t) < 1e-9 for t in t_starts)
+            if has_zero_start:
+                max_t_end = max(t_ends)
+                logger.debug(
+                    f"Particle {pname}: found {len(individual_files)} individual cache files "
+                    f"with t_start=0.0 present. Using max t_end: {max_t_end:.2f}"
                 )
-
-            progress_dict[pname] = max_timestamp
+                progress_dict[pname] = max_t_end
+            else:
+                # No file starts from 0.0, cannot guarantee continuity
+                logger.warning(
+                    f"Particle {pname}: found {len(individual_files)} individual cache files "
+                    f"but none starts from t=0.0. Setting progress to -1.0"
+                )
+                progress_dict[pname] = -1.0
 
         return progress_dict
 
