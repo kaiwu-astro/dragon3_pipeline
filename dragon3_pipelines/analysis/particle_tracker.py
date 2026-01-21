@@ -165,7 +165,7 @@ class ParticleTracker:
         else:
             batch_size = max(1, int(mem_cap_bytes // per_file_bytes))
 
-        batch_size = min(batch_size, len(files_to_process))
+        batch_size = min(batch_size, len(files_to_process), self.config.processes_count)
         logger.info(
             f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
             f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
@@ -718,7 +718,7 @@ class ParticleTracker:
         )
 
         # 保险：进程被杀可能导致一些文件已经合并，一些没有
-        # 若已有 merged 文件的 until 时间戳 > 当前片段 t_end，则视为已合并，清理片段文件后返回
+        # 若已有 history_until 文件的 until 时间戳 > 当前片段 t_end，则视为已合并，清理片段文件后返回
         if merged_cache_files:
             latest_merged = merged_cache_files[0]
             base = os.path.basename(latest_merged)
