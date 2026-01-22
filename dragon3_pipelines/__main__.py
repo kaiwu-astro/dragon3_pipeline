@@ -16,6 +16,7 @@ import multiprocessing
 
 import matplotlib.pyplot as plt
 from rich.progress import Progress
+from rich.logging import RichHandler
 
 from dragon3_pipelines.config import ConfigManager
 from dragon3_pipelines.io import HDF5FileProcessor, LagrFileProcessor
@@ -27,9 +28,10 @@ try:
     logger
 except NameError:
     logger = logging.getLogger(__name__)
-    if not logger.handlers:
-        logger.addHandler(logging.StreamHandler(sys.stdout))
-        logger.setLevel(logging.INFO)
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[RichHandler(rich_tracebacks=True)]
+    )
 
 
 class SimulationPlotter:
@@ -193,11 +195,11 @@ def main() -> int:
         opts, args = getopt.getopt(sys.argv[1:], "k:", long_options)
         if "--debug" in dict(opts):
             logging.basicConfig(
-                level=logging.DEBUG, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+                level=logging.DEBUG, format="%(asctime)s %(name)s: %(message)s"
             )
         else:
             logging.basicConfig(
-                level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+                level=logging.INFO, format="%(asctime)s %(name)s: %(message)s"
             )
     except getopt.GetoptError as err:
         print(err)

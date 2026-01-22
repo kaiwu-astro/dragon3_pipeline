@@ -179,15 +179,20 @@ class ParticleTracker:
                 per_file_bytes += int(df.memory_usage(deep=True).sum())
 
         mem_cap_bytes = self.config.mem_cap_bytes
+        mem_reserved_for_hdf5_read = mem_cap_bytes * 3 / 4
         if per_file_bytes <= 0:
-            batch_size = 1
+            pool_size = 1
         else:
-            batch_size = max(1, int((mem_cap_bytes * 3 / 4) // per_file_bytes)) # 留1/4缓存particle_df，避免疯狂写盘
-
-        batch_size = min(batch_size, len(files_to_process), self.config.processes_count)
+            pool_size = max(1, int(mem_reserved_for_hdf5_read // per_file_bytes)) # 留1/4缓存particle_df，避免疯狂写盘
+        pool_size = min(pool_size, len(files_to_process), self.config.processes_count)
+        N = sample_df_dict["scalars"]['N'].iloc[0] if 'N' in sample_df_dict['scalars'].columns else 1000000
+        mem_reserved_for_result_cache = mem_cap_bytes / 4
+        mem_result_cache_from_each_hdf5 = per_file_bytes / N * len(particle_names)
+        batch_size = int(mem_reserved_for_result_cache / mem_result_cache_from_each_hdf5)
         logger.info(
-            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
-            f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
+            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, " +
+            f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, " +
+            f"pool_size: {pool_size}, " +
             f"batch_size: {batch_size}"
         )
 
@@ -215,7 +220,7 @@ class ParticleTracker:
             ]
 
             with ctx.Pool(
-                processes=min(batch_size, self.config.processes_count),
+                processes=pool_size,
                 maxtasksperchild=self.config.tasks_per_child,
             ) as pool:
                 iterator = pool.imap(self._process_one_hdf5_file_for_particles_wrapper_mp, tasks)
@@ -317,43 +322,56 @@ class ParticleTracker:
                 in_mem_time_start = None
 
         # After looping over all hdf5s, flush remaining in-memory data
+        tasks = []
         if in_mem_particle_dfs and last_batch_end is not None:
             t_start = in_mem_time_start if in_mem_time_start is not None else last_batch_end
             t_end = last_batch_end
 
-            tasks = [
-                (
+            for pname, dfs in in_mem_particle_dfs.items():
+                if dfs:
+                    tasks.append((
+                        simu_name,
+                        int(pname),
+                        pd.concat(dfs, ignore_index=True),
+                        t_start,
+                        t_end,
+                        0,  # n_cache_tol=0 to force merge
+                    ))
+        else:
+            # No in-memory data, but still need to trigger merge for existing cache files
+            t_start = last_batch_end if last_batch_end is not None else 0.0
+            t_end = last_batch_end if last_batch_end is not None else 0.0
+            
+            for pname in particle_names:
+                tasks.append((
                     simu_name,
                     int(pname),
-                    pd.concat(dfs, ignore_index=True),
-                    t_start,
-                    t_end,
-                    1,  # n_cache_tol set to 1 to force merge at the end
-                )
-                for pname, dfs in in_mem_particle_dfs.items()
-                if dfs
-            ]
+                    None,  # Empty df
+                    0,
+                    0,
+                    0,
+                ))
 
-            if tasks:
-                # with ctx.Pool(
-                #     processes=self.config.processes_count,
-                #     maxtasksperchild=self.config.tasks_per_child,
-                # ) as pool:
-                #     iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
-                #     for _ in tqdm(
-                #         iterator,
-                #         total=len(tasks),
-                #         desc=f"Finally accumulating particle caches in {simu_name}",
-                #     ):
-                #         pass
-                # 同样改为串行
-                iterator = map(self._accumulate_particle_df_wrapper_mp, tasks)
-                with Progress() as progress:
-                    task_id = progress.add_task(
-                        f"Finally accumulating particle caches in {simu_name}", total=len(tasks)
-                    )
-                    for _ in iterator:
-                        progress.advance(task_id)
+        if tasks:
+            # with ctx.Pool(
+            #     processes=self.config.processes_count,
+            #     maxtasksperchild=self.config.tasks_per_child,
+            # ) as pool:
+            #     iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
+            #     for _ in tqdm(
+            #         iterator,
+            #         total=len(tasks),
+            #         desc=f"Finally accumulating particle caches in {simu_name}",
+            #     ):
+            #         pass
+            # 同样改为串行
+            iterator = map(self._accumulate_particle_df_wrapper_mp, tasks)
+            with Progress() as progress:
+                task_id = progress.add_task(
+                    f"Finally accumulating particle caches in {simu_name}", total=len(tasks)
+                )
+                for _ in iterator:
+                    progress.advance(task_id)
 
         logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
 
@@ -815,8 +833,6 @@ class ParticleTracker:
             n_cache_tol: Threshold for number of cache files before merging
             use_miltithread: Whether to use multithreading when reading feather files
         """
-        if new_particle_df is None or new_particle_df.empty:
-            return
 
         cache_base = self.config.particle_df_cache_dir_of[simu_name]
         particle_dir = os.path.join(cache_base, str(particle_name))
@@ -850,7 +866,10 @@ class ParticleTracker:
 
         cache_file_count = len(individual_cache_files)
 
-        if cache_file_count < n_cache_tol:
+        if (new_particle_df is None or new_particle_df.empty) and cache_file_count == 0:
+            return
+
+        if cache_file_count < n_cache_tol and new_particle_df is not None and not new_particle_df.empty:
             # Strategy 1: Just write a new feather file
             new_cache_file = os.path.join(
                 particle_dir, f"{particle_name}_df_{t_start:.6f}_to_{t_end:.6f}.df.feather"
@@ -871,7 +890,7 @@ class ParticleTracker:
             )
 
             # Collect all DataFrames to merge
-            dfs_to_merge = [new_particle_df]
+            dfs_to_merge = [new_particle_df] if new_particle_df is not None and not new_particle_df.empty else []
 
             # Read all individual cache files
             for cache_file in individual_cache_files:
