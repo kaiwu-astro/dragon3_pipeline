@@ -561,7 +561,11 @@ class HDF5FileProcessor:
             return pd.DataFrame()
 
     def get_all_hdf5_paths(
-        self, simu_name: str, wait_age_hour: int = 24, sample_every_nb_time: float = 1.0
+        self, 
+        simu_name: str, 
+        wait_age_hour: int = 24, 
+        sample_every_nb_time: float = 1.0,
+        exclude_bad_dirname = True
     ) -> List[str]:
         """
         Get all HDF5 file paths for a simulation, sorted by time
@@ -569,7 +573,8 @@ class HDF5FileProcessor:
         Args:
             simu_name: Name of the simulation
             wait_age_hour: Wait time in hours before processing a file (to ensure it's completely written)
-            sample_every_nb_time: Sampling interval in N-body time units based on filename time
+            sample_every_nb_time: Sampling interval in N-body time units based on filename time. Disable if None or <=0.
+            exclude_bad_dirname: If True, exclude files whose parent dir name has "bad" within
 
         Returns:
             List of HDF5 file paths sorted by time, excluding files younger than wait_age_hour
@@ -582,6 +587,12 @@ class HDF5FileProcessor:
         hdf5_files = [fn for fn in hdf5_files if os.path.getmtime(fn) <= cutoff]
         if not hdf5_files:
             return []
+        
+        if exclude_bad_dirname:
+            # if parent dir (not check parent of parent) of hdf5 file contains "bad", exclude it
+            hdf5_files = [
+                fn for fn in hdf5_files if "bad" not in os.path.basename(os.path.dirname(fn)).lower()
+            ]
 
         times = np.array(
             [self.get_hdf5_file_time_from_filename(fn) for fn in hdf5_files], dtype=float
@@ -595,5 +606,19 @@ class HDF5FileProcessor:
         )  # note: 无需因可能倒带重复跑而去重，因为这一步自带去重，只会留一个
         indices = indices[indices < len(times)]
         unique_indices = np.unique(indices)
+
+        # 检查文件列表中是否漏了：检查文件名时间戳的实际间隔是否严格为 sample_every_nb_time ，否则输出遗漏的时间点
+        actual_times = times[unique_indices]
+        time_diffs = np.diff(actual_times)
+        expected_diff = sample_every_nb_time
+        tolerance = expected_diff * 0.1  # 10% 容差
+        for i, diff in enumerate(time_diffs):
+            if abs(diff - expected_diff) > tolerance:
+                n_missing = int(round(diff / expected_diff)) - 1
+                for j in range(n_missing):
+                    missing_time = actual_times[i] + (j + 1) * expected_diff
+                    logger.warning(
+                        f"[get_all_hdf5_paths] Missing HDF5 file for time ~{missing_time:.2f} (between {actual_times[i]:.2f} and {actual_times[i+1]:.2f})"
+                    )
 
         return [hdf5_files[i] for i in unique_indices]

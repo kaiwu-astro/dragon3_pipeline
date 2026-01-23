@@ -194,7 +194,7 @@ class ParticleTracker:
         )
         mem_reserved_for_result_cache = mem_cap_bytes / 4
         mem_result_cache_from_each_hdf5 = per_file_bytes / N * len(particle_names)
-        batch_size = int(mem_reserved_for_result_cache / mem_result_cache_from_each_hdf5)
+        batch_size = int(mem_reserved_for_result_cache / mem_result_cache_from_each_hdf5 / 2)  # 留一半空间用作合并
         logger.info(
             f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
             + f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
@@ -347,9 +347,6 @@ class ParticleTracker:
                     )
         else:
             # No in-memory data, but still need to trigger merge for existing cache files
-            t_start = last_batch_end if last_batch_end is not None else 0.0
-            t_end = last_batch_end if last_batch_end is not None else 0.0
-
             for pname in particle_names:
                 tasks.append(
                     (
@@ -363,18 +360,6 @@ class ParticleTracker:
                 )
 
         if tasks:
-            # with ctx.Pool(
-            #     processes=self.config.processes_count,
-            #     maxtasksperchild=self.config.tasks_per_child,
-            # ) as pool:
-            #     iterator = pool.imap(self._accumulate_particle_df_wrapper_mp, tasks)
-            #     for _ in tqdm(
-            #         iterator,
-            #         total=len(tasks),
-            #         desc=f"Finally accumulating particle caches in {simu_name}",
-            #     ):
-            #         pass
-            # 同样改为串行
             iterator = map(self._accumulate_particle_df_wrapper_mp, tasks)
             with Progress() as progress:
                 task_id = progress.add_task(
@@ -382,6 +367,33 @@ class ParticleTracker:
                 )
                 for _ in iterator:
                     progress.advance(task_id)
+
+        # Final check: ensure each particle has at least one history_until file
+        for pn in particle_names:
+            until_files = glob(os.path.join(
+                self.config.particle_df_cache_dir_of[simu_name],
+                str(pn),
+                f"{pn}_history_until_*.df.feather"
+            ))
+            if len(until_files) <= 0:
+                self._accumulate_particle_df(
+                    simu_name, 
+                    int(pn), 
+                    new_particle_df=None, 
+                    t_start=0, 
+                    t_end=0, 
+                    n_cache_tol=0, 
+                    use_miltithread=True
+                )
+
+        part_files = glob(os.path.join(
+            self.config.particle_df_cache_dir_of[simu_name],
+            f"*_df_*to*.df.feather"
+        ))
+        if part_files:
+            logger.warning(
+                f"Some particle cache files remain unmerged after processing all HDF5 files: {part_files[:5]} ..."
+            )
 
         logger.info(f"Completed processing all HDF5 files for simulation {simu_name}")
 
