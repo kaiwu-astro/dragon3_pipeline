@@ -243,6 +243,8 @@ class ParticleTracker:
                             if pdf is not None and not pdf.empty:
                                 batch_particle_dfs.setdefault(int(pname), []).append(pdf)
 
+            logger.debug(f"Pool closed successfully for HDF5 batch number {start // batch_size + 1} in {simu_name}")
+
             # 5. Accumulate and persist per particle (on condition)
             # Get time range for this batch
             t_batch_start = self.hdf5_file_processor.get_hdf5_file_time_from_filename(
@@ -277,7 +279,7 @@ class ParticleTracker:
             else:  # write to file (mem threshold exceeded)
                 t_start = in_mem_time_start if in_mem_time_start is not None else t_batch_start
                 t_end = t_batch_end
-
+                logger.debug("Particle data memory cap exceeded. Merging particle dfs from hdf5...")
                 tasks = [
                     (
                         simu_name,
@@ -290,6 +292,7 @@ class ParticleTracker:
                     for pname, dfs in tentative_in_mem.items()
                     if dfs
                 ]
+                logger.debug("Particle dfs merged. Writing to disk...")
 
                 cache_base = self.config.particle_df_cache_dir_of[simu_name]
                 particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
