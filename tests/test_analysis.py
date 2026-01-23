@@ -291,6 +291,85 @@ class TestParticleTracker:
         # Should use max timestamp (7.50)
         assert result[1000] == 7.5
 
+    def test_read_history_with_direct_path(self, particle_tracker, tmp_path):
+        """Test read_history with direct feather path"""
+        # Create a test feather file
+        test_df = pd.DataFrame(
+            {
+                "Name": [1000, 1000],
+                "TTOT": [1.0, 2.0],
+                "M": [10.0, 9.5],
+            }
+        )
+        feather_path = tmp_path / "test_history.feather"
+        test_df.to_feather(feather_path)
+
+        result = particle_tracker.read_history(feather_path=str(feather_path))
+
+        assert len(result) == 2
+        assert list(result["Name"]) == [1000, 1000]
+        assert list(result["TTOT"]) == [1.0, 2.0]
+
+    def test_read_history_with_simu_and_particle_name(
+        self, particle_tracker, mock_config, tmp_path
+    ):
+        """Test read_history with simulation name and particle name"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        # Create particle directory and history file
+        particle_dir = tmp_path / "5000"
+        particle_dir.mkdir()
+
+        test_df = pd.DataFrame(
+            {
+                "Name": [5000, 5000, 5000],
+                "TTOT": [0.0, 1.0, 2.0],
+                "M": [15.0, 14.5, 14.0],
+            }
+        )
+        test_df.to_feather(particle_dir / "5000_history_until_2.00.df.feather")
+
+        result = particle_tracker.read_history(simu_name="test_simu", particle_name=5000)
+
+        assert len(result) == 3
+        assert result["Name"].iloc[0] == 5000
+        assert list(result["TTOT"]) == [0.0, 1.0, 2.0]
+
+    def test_read_history_missing_file(self, particle_tracker):
+        """Test read_history returns empty DataFrame for missing file"""
+        result = particle_tracker.read_history(feather_path="/nonexistent/path.feather")
+        assert result.empty
+
+    def test_read_history_missing_params_raises_error(self, particle_tracker):
+        """Test read_history raises ValueError when required params missing"""
+        with pytest.raises(ValueError, match="Either feather_path or both simu_name"):
+            particle_tracker.read_history()
+
+    def test_read_history_partial_params_raises_error(self, particle_tracker):
+        """Test read_history raises ValueError when only simu_name is provided"""
+        with pytest.raises(ValueError, match="Either feather_path or both simu_name"):
+            particle_tracker.read_history(simu_name="test_simu")
+
+    def test_read_history_picks_latest_file(self, particle_tracker, mock_config, tmp_path):
+        """Test read_history picks the latest history file"""
+        mock_config.particle_df_cache_dir_of["test_simu"] = str(tmp_path)
+
+        particle_dir = tmp_path / "6000"
+        particle_dir.mkdir()
+
+        # Create multiple history files with different timestamps
+        df1 = pd.DataFrame({"Name": [6000], "TTOT": [5.0]})
+        df2 = pd.DataFrame({"Name": [6000, 6000], "TTOT": [5.0, 10.0]})
+
+        df1.to_feather(particle_dir / "6000_history_until_5.00.df.feather")
+        df2.to_feather(particle_dir / "6000_history_until_10.00.df.feather")
+
+        result = particle_tracker.read_history(simu_name="test_simu", particle_name=6000)
+
+        # Should read the file with the higher timestamp (10.00)
+        assert len(result) == 2
+        assert result["TTOT"].max() == 10.0
+
 
 class TestHDF5ParticleTask:
     """Tests for HDF5ParticleTask dataclass"""
@@ -369,3 +448,103 @@ class TestPhysics:
         # Should still return valid positive time
         assert result > 0
         assert np.isfinite(result)
+
+
+class TestBinaryOrbitFunctions:
+    """Tests for binary orbit calculation functions"""
+
+    def test_compute_binary_orbit_relative_positions_equal_masses(self):
+        """Test compute_binary_orbit_relative_positions with equal masses"""
+        from dragon3_pipelines.analysis import compute_binary_orbit_relative_positions
+
+        m1, m2 = 10.0, 10.0
+        rel_x, rel_y, rel_z = 2.0, 0.0, 0.0
+
+        (x1, y1, z1), (x2, y2, z2) = compute_binary_orbit_relative_positions(
+            m1, m2, rel_x, rel_y, rel_z
+        )
+
+        # Equal masses: positions should be equal and opposite
+        assert x1 == pytest.approx(-1.0)
+        assert x2 == pytest.approx(1.0)
+        assert y1 == 0.0
+        assert y2 == 0.0
+        assert z1 == 0.0
+        assert z2 == 0.0
+
+    def test_compute_binary_orbit_relative_positions_unequal_masses(self):
+        """Test compute_binary_orbit_relative_positions with unequal masses"""
+        from dragon3_pipelines.analysis import compute_binary_orbit_relative_positions
+
+        m1, m2 = 30.0, 10.0  # 3:1 mass ratio
+        rel_x, rel_y, rel_z = 4.0, 0.0, 0.0
+
+        (x1, y1, z1), (x2, y2, z2) = compute_binary_orbit_relative_positions(
+            m1, m2, rel_x, rel_y, rel_z
+        )
+
+        # r1 = -m2/(m1+m2) * rel = -10/40 * 4 = -1
+        # r2 = m1/(m1+m2) * rel = 30/40 * 4 = 3
+        assert x1 == pytest.approx(-1.0)
+        assert x2 == pytest.approx(3.0)
+
+    def test_compute_binary_orbit_relative_positions_zero_mass(self):
+        """Test compute_binary_orbit_relative_positions with zero total mass"""
+        from dragon3_pipelines.analysis import compute_binary_orbit_relative_positions
+
+        m1, m2 = 0.0, 0.0
+        rel_x, rel_y, rel_z = 2.0, 1.0, 0.5
+
+        (x1, y1, z1), (x2, y2, z2) = compute_binary_orbit_relative_positions(
+            m1, m2, rel_x, rel_y, rel_z
+        )
+
+        # Zero mass should return zero positions
+        assert (x1, y1, z1) == (0.0, 0.0, 0.0)
+        assert (x2, y2, z2) == (0.0, 0.0, 0.0)
+
+    def test_compute_individual_orbit_params_equal_masses(self):
+        """Test compute_individual_orbit_params with equal masses"""
+        from dragon3_pipelines.analysis import compute_individual_orbit_params
+
+        a_bin, ecc_bin = 10.0, 0.5
+        m1, m2 = 10.0, 10.0
+
+        (a1, e1), (a2, e2) = compute_individual_orbit_params(a_bin, ecc_bin, m1, m2)
+
+        # Equal masses: each star has half the semi-major axis
+        assert a1 == pytest.approx(5.0)
+        assert a2 == pytest.approx(5.0)
+        assert e1 == pytest.approx(0.5)
+        assert e2 == pytest.approx(0.5)
+
+    def test_compute_individual_orbit_params_unequal_masses(self):
+        """Test compute_individual_orbit_params with unequal masses"""
+        from dragon3_pipelines.analysis import compute_individual_orbit_params
+
+        a_bin, ecc_bin = 100.0, 0.3
+        m1, m2 = 30.0, 10.0  # 3:1 mass ratio
+
+        (a1, e1), (a2, e2) = compute_individual_orbit_params(a_bin, ecc_bin, m1, m2)
+
+        # a1 = a * m2/(m1+m2) = 100 * 10/40 = 25
+        # a2 = a * m1/(m1+m2) = 100 * 30/40 = 75
+        assert a1 == pytest.approx(25.0)
+        assert a2 == pytest.approx(75.0)
+        assert e1 == pytest.approx(0.3)
+        assert e2 == pytest.approx(0.3)
+
+    def test_compute_individual_orbit_params_zero_mass(self):
+        """Test compute_individual_orbit_params with zero total mass"""
+        from dragon3_pipelines.analysis import compute_individual_orbit_params
+
+        a_bin, ecc_bin = 10.0, 0.5
+        m1, m2 = 0.0, 0.0
+
+        (a1, e1), (a2, e2) = compute_individual_orbit_params(a_bin, ecc_bin, m1, m2)
+
+        # Zero mass should return zero semi-major axes
+        assert a1 == 0.0
+        assert a2 == 0.0
+        assert e1 == pytest.approx(0.5)
+        assert e2 == pytest.approx(0.5)

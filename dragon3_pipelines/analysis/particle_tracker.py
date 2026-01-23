@@ -183,17 +183,23 @@ class ParticleTracker:
         if per_file_bytes <= 0:
             pool_size = 1
         else:
-            pool_size = max(1, int(mem_reserved_for_hdf5_read // per_file_bytes)) # 留1/4缓存particle_df，避免疯狂写盘
+            pool_size = max(
+                1, int(mem_reserved_for_hdf5_read // per_file_bytes)
+            )  # 留1/4缓存particle_df，避免疯狂写盘
         pool_size = min(pool_size, len(files_to_process), self.config.processes_count)
-        N = sample_df_dict["scalars"]['N'].iloc[0] if 'N' in sample_df_dict['scalars'].columns else 1000000
+        N = (
+            sample_df_dict["scalars"]["N"].iloc[0]
+            if "N" in sample_df_dict["scalars"].columns
+            else 1000000
+        )
         mem_reserved_for_result_cache = mem_cap_bytes / 4
         mem_result_cache_from_each_hdf5 = per_file_bytes / N * len(particle_names)
         batch_size = int(mem_reserved_for_result_cache / mem_result_cache_from_each_hdf5)
         logger.info(
-            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, " +
-            f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, " +
-            f"pool_size: {pool_size}, " +
-            f"batch_size: {batch_size}"
+            f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
+            + f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
+            + f"pool_size: {pool_size}, "
+            + f"batch_size: {batch_size}"
         )
 
         # 4. Batch process HDF5 files
@@ -329,28 +335,32 @@ class ParticleTracker:
 
             for pname, dfs in in_mem_particle_dfs.items():
                 if dfs:
-                    tasks.append((
-                        simu_name,
-                        int(pname),
-                        pd.concat(dfs, ignore_index=True),
-                        t_start,
-                        t_end,
-                        0,  # n_cache_tol=0 to force merge
-                    ))
+                    tasks.append(
+                        (
+                            simu_name,
+                            int(pname),
+                            pd.concat(dfs, ignore_index=True),
+                            t_start,
+                            t_end,
+                            0,  # n_cache_tol=0 to force merge
+                        )
+                    )
         else:
             # No in-memory data, but still need to trigger merge for existing cache files
             t_start = last_batch_end if last_batch_end is not None else 0.0
             t_end = last_batch_end if last_batch_end is not None else 0.0
-            
+
             for pname in particle_names:
-                tasks.append((
-                    simu_name,
-                    int(pname),
-                    None,  # Empty df
-                    0,
-                    0,
-                    0,
-                ))
+                tasks.append(
+                    (
+                        simu_name,
+                        int(pname),
+                        None,  # Empty df
+                        0,
+                        0,
+                        0,
+                    )
+                )
 
         if tasks:
             # with ctx.Pool(
@@ -547,6 +557,103 @@ class ParticleTracker:
         else:
             return old_particle_history_df
 
+    def read_history(
+        self,
+        feather_path: Optional[str] = None,
+        simu_name: Optional[str] = None,
+        particle_name: Optional[int] = None,
+    ) -> pd.DataFrame:
+        """
+        Read particle history data from a saved feather file.
+
+        This method provides direct access to previously saved particle history data
+        without triggering any HDF5 file processing.
+
+        Args:
+            feather_path: Direct path to a feather file. If provided, reads from this path.
+            simu_name: Simulation name. Required when using particle_name instead of feather_path.
+            particle_name: Particle name/ID. Required when using simu_name instead of feather_path.
+
+        Returns:
+            DataFrame containing the particle's evolution history.
+            Returns empty DataFrame if file not found.
+
+        Raises:
+            ValueError: If neither feather_path nor (simu_name + particle_name) is provided.
+
+        Example:
+            # Direct path read
+            df = tracker.read_history(feather_path="/path/to/1000_history_until_100.00.df.feather")
+
+            # Read by simulation and particle name (finds latest file automatically)
+            df = tracker.read_history(simu_name="0sb", particle_name=1000)
+        """
+        if feather_path is not None:
+            # Direct path read
+            if not os.path.exists(feather_path):
+                logger.warning(f"Feather file not found: {feather_path}")
+                return pd.DataFrame()
+            try:
+                return pd.read_feather(feather_path)
+            except Exception as e:
+                logger.error(f"Failed to read feather file {feather_path}: {e}")
+                return pd.DataFrame()
+
+        if simu_name is None or particle_name is None:
+            raise ValueError(
+                "Either feather_path or both simu_name and particle_name must be provided"
+            )
+
+        # Build path from simu_name and particle_name
+        cache_base = self.config.particle_df_cache_dir_of.get(simu_name)
+        if cache_base is None:
+            logger.warning(f"No cache directory configured for simulation: {simu_name}")
+            return pd.DataFrame()
+
+        particle_dir = os.path.join(cache_base, str(particle_name))
+        if not os.path.exists(particle_dir):
+            logger.warning(f"Particle directory not found: {particle_dir}")
+            return pd.DataFrame()
+
+        # Find history_until files for this particle
+        history_file_pattern = os.path.join(
+            particle_dir, f"{particle_name}_history_until_*.df.feather"
+        )
+        history_files = glob(history_file_pattern)
+
+        if not history_files:
+            logger.warning(
+                f"No history files found for particle {particle_name} in simulation {simu_name}"
+            )
+            return pd.DataFrame()
+
+        # Sort by extracted timestamp (numeric) to get the latest file
+        import re
+
+        timestamp_pattern = re.compile(r"_history_until_([0-9.]+)\.df\.feather$")
+
+        def extract_timestamp(filepath: str) -> float:
+            match = timestamp_pattern.search(filepath)
+            if match:
+                try:
+                    return float(match.group(1))
+                except ValueError:
+                    return -1.0
+            return -1.0
+
+        # Sort by timestamp descending to get the latest first
+        history_files.sort(key=extract_timestamp, reverse=True)
+
+        # Use the latest file (highest timestamp)
+        latest_file = history_files[0]
+        logger.info(f"Reading particle history from: {latest_file}")
+
+        try:
+            return pd.read_feather(latest_file)
+        except Exception as e:
+            logger.error(f"Failed to read history file {latest_file}: {e}")
+            return pd.DataFrame()
+
     @log_time(logger)
     def get_particle_summary(self, particle_history_df: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -737,7 +844,8 @@ class ParticleTracker:
             individual_prefix = f"{pname}_df_"
             individual_suffix = ".df.feather"
             individual_files = [
-                f for f in files_in_dir 
+                f
+                for f in files_in_dir
                 if f.startswith(individual_prefix) and f.endswith(individual_suffix)
             ]
 
@@ -869,7 +977,11 @@ class ParticleTracker:
         if (new_particle_df is None or new_particle_df.empty) and cache_file_count == 0:
             return
 
-        if cache_file_count < n_cache_tol and new_particle_df is not None and not new_particle_df.empty:
+        if (
+            cache_file_count < n_cache_tol
+            and new_particle_df is not None
+            and not new_particle_df.empty
+        ):
             # Strategy 1: Just write a new feather file
             new_cache_file = os.path.join(
                 particle_dir, f"{particle_name}_df_{t_start:.6f}_to_{t_end:.6f}.df.feather"
@@ -890,7 +1002,11 @@ class ParticleTracker:
             )
 
             # Collect all DataFrames to merge
-            dfs_to_merge = [new_particle_df] if new_particle_df is not None and not new_particle_df.empty else []
+            dfs_to_merge = (
+                [new_particle_df]
+                if new_particle_df is not None and not new_particle_df.empty
+                else []
+            )
 
             # Read all individual cache files
             for cache_file in individual_cache_files:
