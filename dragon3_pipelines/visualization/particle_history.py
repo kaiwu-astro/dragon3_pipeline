@@ -410,6 +410,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         time: Union[str, float, Tuple[float, float]] = "all",
         simu_name: Optional[str] = None,
         particle_name: Optional[int] = None,
+        dpi: int = 150,
     ) -> None:
         """
         Generate visualization plots for particle history.
@@ -425,6 +426,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
                 - (t_start, t_end): Generate plots for time points in this range
             simu_name: Optional simulation name (overrides instance value)
             particle_name: Optional particle name (overrides instance value)
+            dpi: dpi of saved jpg
         """
         if history_df.empty:
             logger.warning("Empty history DataFrame provided")
@@ -472,7 +474,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             self._plot_inset_axes(ax, row)
 
             # Save figure
-            fig.savefig(output_path, dpi=150, bbox_inches="tight")
+            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
             logger.debug(f"Saved plot: {output_path}")
 
             # Close figure to free memory
