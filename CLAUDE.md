@@ -206,7 +206,6 @@ pytest tests/test_config.py -v
 项目配置了 pre-commit（见 `.pre-commit-config.yaml`）：
 - `black` - 代码格式化
 - `ruff` - 代码检查和自动修复
-- `mypy` - 类型检查
 - 各类文件检查（trailing whitespace, YAML 语法, 大文件, merge conflict 等）
 
 安装 pre-commit hooks：
