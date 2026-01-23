@@ -380,18 +380,18 @@ class ParticleTracker:
             ))
             if len(until_files) <= 0:
                 self._accumulate_particle_df(
-                    simu_name, 
-                    int(pn), 
-                    new_particle_df=None, 
-                    t_start=0, 
-                    t_end=0, 
-                    n_cache_tol=0, 
+                    simu_name,
+                    int(pn),
+                    new_particle_df=None,
+                    t_start=0,
+                    t_end=0,
+                    n_cache_tol=0,
                     use_miltithread=True
                 )
 
         part_files = glob(os.path.join(
             self.config.particle_df_cache_dir_of[simu_name],
-            f"*_df_*to*.df.feather"
+            "*_df_*to*.df.feather"
         ))
         if part_files:
             logger.warning(
@@ -592,6 +592,7 @@ class ParticleTracker:
         Returns:
             DataFrame containing the particle's evolution history.
             Returns empty DataFrame if file not found.
+            See the end for columns details.
 
         Raises:
             ValueError: If neither feather_path nor (simu_name + particle_name) is provided.
@@ -602,6 +603,9 @@ class ParticleTracker:
 
             # Read by simulation and particle name (finds latest file automatically)
             df = tracker.read_history(simu_name="0sb", particle_name=1000)
+
+        Columns in returned DataFrame:
+            ['X1', 'X2', 'X3', 'V1', 'V2', 'V3', 'A1', 'A2', 'A3', 'AD1', 'AD2', 'AD3', 'D21', 'D22', 'D23', 'D31', 'D32', 'D33', 'STEP', 'STEPR', 'T0', 'T0R', 'M', 'NB-Sph', 'POT', 'R*', 'L*', 'Teff*', 'RC*', 'MC*', 'KW', 'Name', 'Type', 'ASPN', 'TEV', 'TEV0', 'EPOCH', 'TTOT', 'TTOT/TCR0', 'TTOT/TRH0', 'Time[Myr]', 'X [pc]', 'Y [pc]', 'Z [pc]', 'Distance_to_cluster_center[pc]', 'mod_velocity[kmps]', 'Stellar Type', 'Bin cm X1', 'Bin cm X2', 'Bin cm X3', 'Bin cm V1', 'Bin cm V2', 'Bin cm V3', 'Bin cm A1', 'Bin cm A2', 'Bin cm A3', 'Bin cm AD1', 'Bin cm AD2', 'Bin cm AD3', 'Bin cm D21', 'Bin cm D22', 'Bin cm D23', 'Bin cm D31', 'Bin cm D32', 'Bin cm D33', 'Bin cm STEP', 'Bin cm STEPR', 'Bin cm T0', 'Bin cm T0R', 'Bin M1*', 'Bin M2*', 'Bin rel X1', 'Bin rel X2', 'Bin rel X3', 'Bin rel V1', 'Bin rel V2', 'Bin rel V3', 'Bin rel A1', 'Bin rel A2', 'Bin rel A3', 'Bin rel AD1', 'Bin rel AD2', 'Bin rel AD3', 'Bin rel D21', 'Bin rel D22', 'Bin rel D23', 'Bin rel D31', 'Bin rel D32', 'Bin rel D33', 'Bin POT', 'Bin RS1*', 'Bin L1*', 'Bin Teff1*', 'Bin RS2*', 'Bin L2*', 'Bin Teff2*', 'Bin RC1*', 'Bin MC1*', 'Bin RC2*', 'Bin MC2*', 'Bin A[au]', 'Bin ECC', 'Bin P[d]', 'Bin G', 'Bin KW1', 'Bin KW2', 'Bin cm KW', 'Bin Name1', 'Bin Name2', 'Bin cm Name', 'ASPN1', 'ASPN2', 'TEV1', 'TEV2', 'TEV01', 'TEV02', 'EPOCH1', 'EPOCH2', 'Bin Label', 'TTOT/TCR0_from_binary', 'TTOT/TRH0_from_binary', 'Time[Myr]_from_binary', 'Bin cm X [pc]', 'Bin cm Y [pc]', 'Bin cm Z [pc]', 'primary_mass[solar]', 'secondary_mass[solar]', 'total_mass[solar]', 'Distance_to_cluster_center[pc]_from_binary', 'mass_ratio', 'primary_stellar_type', 'secondary_stellar_type', 'Stellar Type_from_binary', 'peri[au]', 'sum_of_radius[solar]', 'sum_of_radius[au]', 'Ebind_abs_NBODY', 'Ebind/kT', 'is_hard_binary', 'tau_gw[Myr]', 'state', 'companion_name']
         """
         if feather_path is not None:
             # Direct path read
