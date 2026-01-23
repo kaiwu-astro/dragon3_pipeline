@@ -91,7 +91,55 @@ class HDF5FileProcessor:
 
         Returns:
             df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
-                     Each DataFrame contains data for ALL snapshots in this HDF5 file
+                     Each DataFrame contains data for ALL snapshots in this HDF5 file.
+        
+        Note:
+            Columns of df_dict['scalars']:
+            Index(['TTOT', 'NPAIRS', 'RBAR', 'ZMBAR', 'N', 'TSTAR', 'RDENS(1)', 'RDENS(2)',
+            'RDENS(3)', 'TTOT/TCR0', 'TSCALE', 'VSTAR', 'RC', 'NC', 'VC', 'RHOM',
+            'CMAX', 'RSCALE', 'RSMIN', 'DMIN1', 'RG(1)', 'RG(2)', 'RG(3)', 'VG(1)',
+            'VG(2)', 'VG(3)', 'TIDAL(1)', 'TIDAL(2)', 'TIDAL(3)', 'TIDAL(4)', 'GMG',
+            'OMEGA', 'DISK', 'A', 'B', 'ZMET', 'ZPARS(1)', 'ZPARS(2)', 'ZPARS(3)',
+            'ZPARS(4)', 'ZPARS(5)', 'ZPARS(6)', 'ZPARS(7)', 'ZPARS(8)', 'ZPARS(9)',
+            'ZPARS(10)', 'ZPARS(11)', 'ZPARS(12)', 'ZPARS(13)', 'ZPARS(14)',
+            'ZPARS(15)', 'ZPARS(16)', 'ZPARS(17)', 'ZPARS(18)', 'ZPARS(19)',
+            'ZPARS(20)', 'ETAI', 'ETAR', 'ETAU', 'ECLOSE', 'DTMIN', 'RMIN', 'GMIN',
+            'GMAX', 'SMAX', 'NNBOPT', 'EPOCH0', 'N_SINGLE', 'N_BINARY', 'N_MERGER',
+            'Time[Myr]', 'CLIGHT'],
+            dtype='object')
+
+            Columns of df_dict['singles']:
+            Index(['X1', 'X2', 'X3', 'V1', 'V2', 'V3', 'A1', 'A2', 'A3', 'AD1', 'AD2',
+                'AD3', 'D21', 'D22', 'D23', 'D31', 'D32', 'D33', 'STEP', 'STEPR', 'T0',
+                'T0R', 'M', 'NB-Sph', 'POT', 'R*', 'L*', 'Teff*', 'RC*', 'MC*', 'KW',
+                'Name', 'Type', 'ASPN', 'TEV', 'TEV0', 'EPOCH', 'TTOT', 'TTOT/TCR0',
+                'TTOT/TRH0', 'Time[Myr]', 'X [pc]', 'Y [pc]', 'Z [pc]',
+                'Distance_to_cluster_center[pc]', 'mod_velocity[kmps]', 'Stellar Type'],
+                dtype='object')
+            
+            Columns of df_dict['binaries']:
+            Index(['Bin cm X1', 'Bin cm X2', 'Bin cm X3', 'Bin cm V1', 'Bin cm V2',
+                'Bin cm V3', 'Bin cm A1', 'Bin cm A2', 'Bin cm A3', 'Bin cm AD1',
+                'Bin cm AD2', 'Bin cm AD3', 'Bin cm D21', 'Bin cm D22', 'Bin cm D23',
+                'Bin cm D31', 'Bin cm D32', 'Bin cm D33', 'Bin cm STEP', 'Bin cm STEPR',
+                'Bin cm T0', 'Bin cm T0R', 'Bin M1*', 'Bin M2*', 'Bin rel X1',
+                'Bin rel X2', 'Bin rel X3', 'Bin rel V1', 'Bin rel V2', 'Bin rel V3',
+                'Bin rel A1', 'Bin rel A2', 'Bin rel A3', 'Bin rel AD1', 'Bin rel AD2',
+                'Bin rel AD3', 'Bin rel D21', 'Bin rel D22', 'Bin rel D23',
+                'Bin rel D31', 'Bin rel D32', 'Bin rel D33', 'Bin POT', 'Bin RS1*',
+                'Bin L1*', 'Bin Teff1*', 'Bin RS2*', 'Bin L2*', 'Bin Teff2*',
+                'Bin RC1*', 'Bin MC1*', 'Bin RC2*', 'Bin MC2*', 'Bin A[au]', 'Bin ECC',
+                'Bin P[d]', 'Bin G', 'Bin KW1', 'Bin KW2', 'Bin cm KW', 'Bin Name1',
+                'Bin Name2', 'Bin cm Name', 'ASPN1', 'ASPN2', 'TEV1', 'TEV2', 'TEV01',
+                'TEV02', 'EPOCH1', 'EPOCH2', 'Bin Label', 'TTOT', 'TTOT/TCR0',
+                'TTOT/TRH0', 'Time[Myr]', 'Bin cm X [pc]', 'Bin cm Y [pc]',
+                'Bin cm Z [pc]', 'primary_mass[solar]', 'secondary_mass[solar]',
+                'total_mass[solar]', 'Distance_to_cluster_center[pc]', 'mass_ratio',
+                'primary_stellar_type', 'secondary_stellar_type', 'Stellar Type',
+                'peri[au]', 'sum_of_radius[solar]', 'sum_of_radius[au]',
+                'Ebind_abs_NBODY', 'Ebind/kT', 'is_hard_binary', 'tau_gw[Myr]',
+                'peri_over_radius'],
+                dtype='object')
         """
         from dragon3_pipelines.io.text_parsers import (
             get_valueStr_of_namelist_key,
