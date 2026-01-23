@@ -209,7 +209,7 @@ class ParticleTracker:
 
         for start in track(
             range(0, len(files_to_process), batch_size),
-            description=f"Processing all HDF5 batches {simu_name}",
+            description=f"Processing {len(files_to_process) // batch_size + 1} HDF5 batches {simu_name}",
         ):
             batch_files = files_to_process[start : start + batch_size]
             batch_particle_dfs: Dict[int, list] = {}
