@@ -456,7 +456,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
 
         # Generate plot for each row
         for idx, row in filtered_df.iterrows():
-            ttot = row.get("TTOT", 0.0)
+            ttot = row.get("TTOT", -1.0)
             output_path = os.path.join(output_dir, f"{particle_name}_{ttot:.2f}.jpg")
 
             if self.config.skip_existing_plot and os.path.exists(output_path):
