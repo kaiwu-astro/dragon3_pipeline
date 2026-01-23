@@ -281,6 +281,13 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             ax: Matplotlib axes object
             row: Single row from history DataFrame
         """
+
+        def _fmt_val(val, fmt_spec: str, suffix: str = "") -> str:
+            """Safely format a value, returning 'N/A' for NaN."""
+            if pd.isna(val):
+                return f"{'N/A':>{len(fmt_spec.split('.')[0])}}{suffix}"
+            return f"{val:{fmt_spec}}{suffix}"
+
         state = row.get("state", "single")
         is_binary = state == "binary" and pd.notna(row.get("Bin cm X1", np.nan))
 
@@ -291,13 +298,13 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             m = row.get("M", np.nan)
             r = row.get("R*", np.nan)
             teff = row.get("Teff*", np.nan)
-            kw = int(row.get("KW", 0))
+            kw = int(row.get("KW", 0)) if pd.notna(row.get("KW")) else 0
 
             color = self._get_marker_color(kw, teff if pd.notna(teff) else 5778.0)
 
-            info_lines.append(f"M*     = {m:8.3f} Msun")
-            info_lines.append(f"R*     = {r:8.3f} Rsun")
-            info_lines.append(f"Teff*  = {teff:8.0f} K")
+            info_lines.append(f"M*     = {_fmt_val(m, '8.3f', ' Msun')}")
+            info_lines.append(f"R*     = {_fmt_val(r, '8.3f', ' Rsun')}")
+            info_lines.append(f"Teff*  = {_fmt_val(teff, '8.0f', ' K')}")
             info_lines.append(f"KW     = {kw:8d}")
         else:
             # Binary star information
@@ -311,16 +318,16 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             ebind = row.get("Ebind/kT", np.nan)
             tau_gw = row.get("tau_gw[Myr]", np.nan)
 
-            info_lines.append(f"M1     = {m1:8.3f} Msun")
-            info_lines.append(f"M2     = {m2:8.3f} Msun")
-            info_lines.append(f"Teff1  = {teff1:8.0f} K")
-            info_lines.append(f"Teff2  = {teff2:8.0f} K")
+            info_lines.append(f"M1     = {_fmt_val(m1, '8.3f', ' Msun')}")
+            info_lines.append(f"M2     = {_fmt_val(m2, '8.3f', ' Msun')}")
+            info_lines.append(f"Teff1  = {_fmt_val(teff1, '8.0f', ' K')}")
+            info_lines.append(f"Teff2  = {_fmt_val(teff2, '8.0f', ' K')}")
             info_lines.append("")
-            info_lines.append(f"a      = {a_bin:8.3f} au")
-            info_lines.append(f"e      = {ecc:8.4f}")
-            info_lines.append(f"peri   = {peri:8.3f} au")
-            info_lines.append(f"Eb/kT  = {ebind:8.2f}")
-            info_lines.append(f"tau_gw = {tau_gw:8.1f} Myr")
+            info_lines.append(f"a      = {_fmt_val(a_bin, '8.3f', ' au')}")
+            info_lines.append(f"e      = {_fmt_val(ecc, '8.4f', '')}")
+            info_lines.append(f"peri   = {_fmt_val(peri, '8.3f', ' au')}")
+            info_lines.append(f"Eb/kT  = {_fmt_val(ebind, '8.2f', '')}")
+            info_lines.append(f"tau_gw = {_fmt_val(tau_gw, '8.1f', ' Myr')}")
 
             color = "black"
 
