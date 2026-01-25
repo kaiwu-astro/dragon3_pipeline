@@ -8,13 +8,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import astropy.units as u
-from glob import glob
-from matplotlib.patches import Ellipse
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from rich.progress import track
 
 from dragon3_pipelines.analysis.physics import (
     compute_binary_orbit_relative_positions,
-    compute_individual_orbit_params,
+    orbit_elements_from_state,
+    sample_relative_orbit_xy,
 )
 from dragon3_pipelines.utils import log_time
 from dragon3_pipelines.visualization.base import BaseVisualizer, add_grid
@@ -55,6 +55,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         self,
         history_df: pd.DataFrame,
         time: Union[str, float, Tuple[float, float]],
+        sample_every_nb_time: Optional[float] = None,
     ) -> pd.DataFrame:
         """
         Filter history DataFrame by time specification.
@@ -63,8 +64,12 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             history_df: DataFrame containing particle history with 'TTOT' column
             time: Time filter specification:
                 - 'all': Return all rows
+                - 'sample': Return rows sampled evenly over the history
+                            (requires sample_every_nb_time to be specified)
                 - float: Return row with TTOT closest to this value
                 - (t_start, t_end): Return rows where t_start <= TTOT <= t_end
+            sample_every_nb_time: If time='sample', this specifies the interval in NB time units
+
 
         Returns:
             Filtered DataFrame
@@ -84,6 +89,18 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             t_start, t_end = time
             mask = (history_df["TTOT"] >= t_start) & (history_df["TTOT"] <= t_end)
             return history_df[mask]
+
+        if time == "sample" and sample_every_nb_time is not None:
+            # Sample rows every sample_every_nb_time in TTOT
+            target_times = np.arange(
+                history_df["TTOT"].min(),
+                history_df["TTOT"].max() + sample_every_nb_time,
+                sample_every_nb_time,
+            )
+            mask = np.searchsorted(history_df["TTOT"].values, target_times, side="left")
+            mask = mask[mask < len(history_df["TTOT"])]
+            mask = np.unique(mask)
+            return history_df.iloc[mask]
 
         logger.warning(f"Invalid time specification: {time}. Returning all data.")
         return history_df
@@ -133,14 +150,11 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         r_val = max(r_star, r_star_min)
 
         marker_size = (
-            (
-                np.sqrt(marker_size_min)
-                + (np.log10(r_val) - np.log10(r_star_min))
-                / (np.log10(r_star_max) - np.log10(r_star_min))
-                * (np.sqrt(marker_size_max) - np.sqrt(marker_size_min))
-            )
-            ** 2
-        )
+            np.sqrt(marker_size_min)
+            + (np.log10(r_val) - np.log10(r_star_min))
+            / (np.log10(r_star_max) - np.log10(r_star_min))
+            * (np.sqrt(marker_size_max) - np.sqrt(marker_size_min))
+        ) ** 2
         return float(marker_size)
 
     def _plot_main_axes(self, ax: plt.Axes, row: pd.Series) -> None:
@@ -234,7 +248,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
 
         # Compute positions relative to center of mass
         (x1, y1, z1), (x2, y2, z2) = compute_binary_orbit_relative_positions(
-            m1, m2, rel_x*pc_to_au, rel_y*pc_to_au, rel_z*pc_to_au
+            m1, m2, rel_x * pc_to_au, rel_y * pc_to_au, rel_z * pc_to_au
         )
 
         logger.debug(
@@ -263,61 +277,49 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         ax.scatter([x1], [y1], s=size1, c=[color1], edgecolors="white", linewidths=0.5, zorder=5)
         ax.scatter([x2], [y2], s=size2, c=[color2], edgecolors="white", linewidths=0.5, zorder=5)
 
-        # # Annotate with stellar types
-        # st1 = self.config.kw_to_stellar_type.get(kw1, str(kw1))
-        # st2 = self.config.kw_to_stellar_type.get(kw2, str(kw2))
-        # ax.annotate(
-        #     st1,
-        #     (x1, y1),
-        #     ha="center",
-        #     va="center",
-        #     fontsize=8,
-        #     color="white" if kw1 == 14 else "black",
-        #     zorder=6,
-        # )
-        # ax.annotate(
-        #     st2,
-        #     (x2, y2),
-        #     ha="center",
-        #     va="center",
-        #     fontsize=8,
-        #     color="white" if kw2 == 14 else "black",
-        #     zorder=6,
-        # )
-
-        # Compute individual orbit parameters
-        (a1, e1), (a2, e2) = compute_individual_orbit_params(a_bin, ecc_bin, m1, m2)
-
-        # Draw orbital ellipses (centered at origin = center of mass)
-        # For each star, semi-major axis is a_i, semi-minor axis is a_i * sqrt(1 - e^2)
-        b1 = a1 * np.sqrt(1 - e1**2) if e1 < 1 else a1
-        b2 = a2 * np.sqrt(1 - e2**2) if e2 < 1 else a2
-
-        # Draw orbital ellipses
-        ellipse1 = Ellipse(
-            (0, 0),
-            width=2 * a1,
-            height=2 * b1,
-            angle=0,
-            fill=False,
-            linestyle="--",
-            edgecolor=color1 if isinstance(color1, str) else "gray",
-            linewidth=1,
-            alpha=0.6,
+        # Plot orbital paths
+        m_total = m1 + m2
+        rel_v_vec = np.array(
+            [row.get("Bin rel V1", 0.0), row.get("Bin rel V2", 0.0), row.get("Bin rel V3", 0.0)]
         )
-        ellipse2 = Ellipse(
-            (0, 0),
-            width=2 * a2,
-            height=2 * b2,
-            angle=0,
-            fill=False,
-            linestyle="--",
-            edgecolor=color2 if isinstance(color2, str) else "gray",
-            linewidth=1,
-            alpha=0.6,
-        )
-        ax.add_patch(ellipse1)
-        ax.add_patch(ellipse2)
+        rel_r_vec = np.array([rel_x, rel_y, rel_z])
+
+        try:
+            # Determine orbital orientation (inc, Omega, omega) from the current relative state
+            # Note: orientation is generally scale-invariant with respect to units of G
+            _, _, inc, Omega, omega = orbit_elements_from_state(rel_r_vec, rel_v_vec, m_total)
+
+            # Sample the projected relative orbit path (outputs in AU as a_bin is in AU)
+            x_rel, y_rel = sample_relative_orbit_xy(a_bin, ecc_bin, inc, Omega, omega, n=500)
+
+            # Calculate scaling factors for orbits around the center of mass
+            f1 = m2 / m_total
+            f2 = m1 / m_total
+
+            # Plot individual barycentric orbits
+            ax.plot(
+                f1 * x_rel,
+                f1 * y_rel,
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.4,
+                color=color1,
+                zorder=3,
+            )
+            ax.plot(
+                -f2 * x_rel,
+                -f2 * y_rel,
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.4,
+                color=color2,
+                zorder=3,
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to compute or plot binary orbits due to invalid state vectors.\n"
+                f"Error: {e}. \n From: {m_total=}, {rel_r_vec=}, {rel_v_vec=}"
+            )
 
     def _annotate_info(self, ax: plt.Axes, row: pd.Series) -> None:
         """
@@ -345,6 +347,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             r = row.get("R*", np.nan)
             teff = row.get("Teff*", np.nan)
             kw = int(row.get("KW", 0)) if pd.notna(row.get("KW")) else 0
+            modv = row.get("mod_velocity[kmps]", np.nan)
 
             color = self._get_marker_color(kw, teff if pd.notna(teff) else 5778.0)
 
@@ -352,6 +355,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             info_lines.append(f"R*     = {_fmt_val(r, '8.3f', ' Rsun')}")
             info_lines.append(f"Teff*  = {_fmt_val(teff, '8.0f', ' K')}")
             info_lines.append(f"KW     = {kw:8d}")
+            info_lines.append(f"v      = {_fmt_val(modv, '8.3f', ' km/s')}")
         else:
             # Binary star information
             m1 = row.get("Bin M1*", np.nan)
@@ -368,6 +372,16 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             ebind = row.get("Ebind/kT", np.nan)
             _tau_gw = row.get("tau_gw[Myr]", np.nan)
             tau_gw = _tau_gw if _tau_gw < 13799.0 else np.nan  # in processing, 13800 = inf
+            cm_v = row.get(
+                "cm_mod_velocity[kmps]",
+                np.linalg.norm(
+                    [
+                        row.get("Bin cm V1", 0.0),
+                        row.get("Bin cm V2", 0.0),
+                        row.get("Bin cm V3", 0.0),
+                    ]
+                ),
+            )
 
             info_lines.append(f"M1     = {_fmt_val(m1, '8.3f', ' Msun')}")
             info_lines.append(f"M2     = {_fmt_val(m2, '8.3f', ' Msun')}")
@@ -383,6 +397,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             info_lines.append(f"peri   = {_fmt_val(peri, '8.3f', ' au')}")
             info_lines.append(f"Eb/kT  = {_fmt_val(ebind, '8.2f', '')}")
             info_lines.append(f"tau_gw = {_fmt_val(tau_gw, '8.1f', ' Myr')}")
+            info_lines.append(f"v_cm   = {_fmt_val(cm_v, '8.3f', ' km/s')}")
 
             color = "black"
 
@@ -467,7 +482,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         """
         bin_cm_x1 = history_df.get("Bin cm X1")
         is_singleton = "X1" in history_df.columns and (bin_cm_x1 is None or bin_cm_x1.isna().all())
-        
+
         self.is_singleton = is_singleton
         if is_singleton:
             self.main_axes_xylim = None
@@ -482,7 +497,8 @@ class ParticleHistoryVisualizer(BaseVisualizer):
     def plot(
         self,
         history_df: Optional[pd.DataFrame] = None,
-        time: Union[str, float, Tuple[float, float]] = "all",
+        time: Union[str, float, Tuple[float, float]] = "sample",
+        sample_every_nb_time: Optional[float] = None,
         simu_name: Optional[str] = None,
         particle_name: Optional[int] = None,
         dpi: int = 150,
@@ -497,8 +513,10 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             history_df: DataFrame containing particle evolution history
             time: Time filter specification:
                 - 'all': Generate plots for all time points
+                - 'sample': Generate plots sampled evenly over the history (see sample_every_nb_time)
                 - float: Generate plot for the time point closest to this value
                 - (t_start, t_end): Generate plots for time points in this range
+            sample_every_nb_time: need time='sample', this specifies the interval in NB time units
             simu_name: Optional simulation name (overrides instance value)
             particle_name: Optional particle name (overrides instance value)
             dpi: dpi of saved jpg
@@ -510,13 +528,12 @@ class ParticleHistoryVisualizer(BaseVisualizer):
 
         if history_df is None or history_df.empty:
             # read from particle history file
-                    # Build path from simu_name and particle_name
+            # Build path from simu_name and particle_name
             particle_tracker = ParticleTracker(self.config)
             history_df = particle_tracker.read_history(
-                simu_name=simu_name, 
-                particle_name=particle_name
-                )
-            
+                simu_name=simu_name, particle_name=particle_name
+            )
+
         self._get_plot_param_from_history(history_df)
 
         if particle_name is None:
@@ -528,7 +545,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             )
 
         # Filter by time
-        filtered_df = self._filter_by_time(history_df, time)
+        filtered_df = self._filter_by_time(history_df, time, sample_every_nb_time)
 
         if filtered_df.empty:
             logger.warning(f"No data after filtering by time={time}")
@@ -536,11 +553,17 @@ class ParticleHistoryVisualizer(BaseVisualizer):
 
         # Create output directory
         plot_base_dir = self.config.plot_dir
-        output_dir = os.path.join(plot_base_dir, "particle_history", str(particle_name))
+        output_dir = os.path.join(
+            plot_base_dir, "particle_history", self.simu_name, str(particle_name)
+        )
         os.makedirs(output_dir, exist_ok=True)
 
         # Generate plot for each row
-        for idx, row in filtered_df.iterrows():
+        for idx, row in track(
+            filtered_df.iterrows(),
+            description=f"Plotting particle {particle_name} history",
+            total=len(filtered_df),
+        ):
             ttot = row.get("TTOT", -1.0)
             output_path = os.path.join(output_dir, f"{particle_name}_{ttot:.2f}.jpg")
 
@@ -563,7 +586,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             # Close figure to free memory
             try:
                 __IPYTHON__
-                if self.config.close_figure_in_ipython:
+                if self.config.close_figure_in_ipython or not isinstance(time, (int, float)):
                     plt.close(fig)
             except NameError:
                 plt.close(fig)
