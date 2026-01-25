@@ -92,7 +92,7 @@ class HDF5FileProcessor:
         Returns:
             df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
                      Each DataFrame contains data for ALL snapshots in this HDF5 file.
-        
+
         Note:
             Columns of df_dict['scalars']:
             Index(['TTOT', 'NPAIRS', 'RBAR', 'ZMBAR', 'N', 'TSTAR', 'RDENS(1)', 'RDENS(2)',
@@ -116,7 +116,7 @@ class HDF5FileProcessor:
                 'TTOT/TRH0', 'Time[Myr]', 'X [pc]', 'Y [pc]', 'Z [pc]',
                 'Distance_to_cluster_center[pc]', 'mod_velocity[kmps]', 'Stellar Type'],
                 dtype='object')
-            
+
             Columns of df_dict['binaries']:
             Index(['Bin cm X1', 'Bin cm X2', 'Bin cm X3', 'Bin cm V1', 'Bin cm V2',
                 'Bin cm V3', 'Bin cm A1', 'Bin cm A2', 'Bin cm A3', 'Bin cm AD1',
@@ -609,11 +609,11 @@ class HDF5FileProcessor:
             return pd.DataFrame()
 
     def get_all_hdf5_paths(
-        self, 
-        simu_name: str, 
-        wait_age_hour: int = 24, 
+        self,
+        simu_name: str,
+        wait_age_hour: int = 24,
         sample_every_nb_time: float = 1.0,
-        exclude_bad_dirname = True
+        exclude_bad_dirname=True,
     ) -> List[str]:
         """
         Get all HDF5 file paths for a simulation, sorted by time
@@ -635,11 +635,13 @@ class HDF5FileProcessor:
         hdf5_files = [fn for fn in hdf5_files if os.path.getmtime(fn) <= cutoff]
         if not hdf5_files:
             return []
-        
+
         if exclude_bad_dirname:
             # if parent dir (not check parent of parent) of hdf5 file contains "bad", exclude it
             hdf5_files = [
-                fn for fn in hdf5_files if "bad" not in os.path.basename(os.path.dirname(fn)).lower()
+                fn
+                for fn in hdf5_files
+                if "bad" not in os.path.basename(os.path.dirname(fn)).lower()
             ]
 
         times = np.array(

@@ -194,7 +194,9 @@ class ParticleTracker:
         )
         mem_reserved_for_result_cache = mem_cap_bytes / 4
         mem_result_cache_from_each_hdf5 = per_file_bytes / N * len(particle_names)
-        batch_size = int(mem_reserved_for_result_cache / mem_result_cache_from_each_hdf5 / 2)  # 留一半空间用作合并
+        batch_size = int(
+            mem_reserved_for_result_cache / mem_result_cache_from_each_hdf5 / 2
+        )  # 留一半空间用作合并
         logger.info(
             f"Memory cap: {mem_cap_bytes / 1024**3:.2f} GB, "
             + f"per-file estimate: {per_file_bytes / 1024**3:.4f} GB, "
@@ -243,7 +245,9 @@ class ParticleTracker:
                             if pdf is not None and not pdf.empty:
                                 batch_particle_dfs.setdefault(int(pname), []).append(pdf)
 
-            logger.debug(f"Pool closed successfully for HDF5 batch number {start // batch_size + 1} in {simu_name}")
+            logger.debug(
+                f"Pool closed successfully for HDF5 batch number {start // batch_size + 1} in {simu_name}"
+            )
 
             # 5. Accumulate and persist per particle (on condition)
             # Get time range for this batch
@@ -373,11 +377,13 @@ class ParticleTracker:
 
         # Final check: ensure each particle has at least one history_until file
         for pn in particle_names:
-            until_files = glob(os.path.join(
-                self.config.particle_df_cache_dir_of[simu_name],
-                str(pn),
-                f"{pn}_history_until_*.df.feather"
-            ))
+            until_files = glob(
+                os.path.join(
+                    self.config.particle_df_cache_dir_of[simu_name],
+                    str(pn),
+                    f"{pn}_history_until_*.df.feather",
+                )
+            )
             if len(until_files) <= 0:
                 self._accumulate_particle_df(
                     simu_name,
@@ -386,13 +392,12 @@ class ParticleTracker:
                     t_start=0,
                     t_end=0,
                     n_cache_tol=0,
-                    use_miltithread=True
+                    use_miltithread=True,
                 )
 
-        part_files = glob(os.path.join(
-            self.config.particle_df_cache_dir_of[simu_name],
-            "*_df_*to*.df.feather"
-        ))
+        part_files = glob(
+            os.path.join(self.config.particle_df_cache_dir_of[simu_name], "*_df_*to*.df.feather")
+        )
         if part_files:
             logger.warning(
                 f"Some particle cache files remain unmerged after processing all HDF5 files: {part_files[:5]} ..."

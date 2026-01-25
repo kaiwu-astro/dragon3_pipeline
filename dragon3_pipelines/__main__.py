@@ -28,10 +28,7 @@ try:
     logger
 except NameError:
     logger = logging.getLogger(__name__)
-    logging.basicConfig(
-        level=logging.INFO,
-        handlers=[RichHandler(rich_tracebacks=True)]
-    )
+    logging.basicConfig(level=logging.INFO, handlers=[RichHandler(rich_tracebacks=True)])
 
 
 class SimulationPlotter:
@@ -194,13 +191,9 @@ def main() -> int:
         long_options = ["skip-until=", "debug"]
         opts, args = getopt.getopt(sys.argv[1:], "k:", long_options)
         if "--debug" in dict(opts):
-            logging.basicConfig(
-                level=logging.DEBUG, format="%(asctime)s %(name)s: %(message)s"
-            )
+            logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s: %(message)s")
         else:
-            logging.basicConfig(
-                level=logging.INFO, format="%(asctime)s %(name)s: %(message)s"
-            )
+            logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     except getopt.GetoptError as err:
         print(err)
         sys.exit(2)

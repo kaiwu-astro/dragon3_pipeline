@@ -87,6 +87,7 @@ def compute_individual_orbit_params(
 
     return (a1, ecc_bin), (a2, ecc_bin)
 
+
 def orbit_elements_from_state(
     r: np.ndarray, v: np.ndarray, mu: float
 ) -> Tuple[float, float, float, float, float]:
@@ -164,16 +165,11 @@ def rot_matrix(Omega: float, inc: float, omega: float) -> np.ndarray:
     ci, si = np.cos(inc), np.sin(inc)
     co, so = np.cos(omega), np.sin(omega)
 
-    RzO = np.array([[ cO, -sO, 0],
-                    [ sO,  cO, 0],
-                    [  0,   0, 1]])
-    Rxi = np.array([[ 1,  0,   0],
-                    [ 0, ci, -si],
-                    [ 0, si,  ci]])
-    Rzo = np.array([[ co, -so, 0],
-                    [ so,  co, 0],
-                    [  0,   0, 1]])
+    RzO = np.array([[cO, -sO, 0], [sO, cO, 0], [0, 0, 1]])
+    Rxi = np.array([[1, 0, 0], [0, ci, -si], [0, si, ci]])
+    Rzo = np.array([[co, -so, 0], [so, co, 0], [0, 0, 1]])
     return RzO @ Rxi @ Rzo  # PQW -> inertial
+
 
 def sample_relative_orbit_xy(
     a_rel: float, e: float, i: float, Omega: float, omega: float, n: int = 600
