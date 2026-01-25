@@ -33,7 +33,7 @@ def save(datadir: str, vars: List[Any], fname: str = "save.pkl") -> None:
         with open(path, "wb") as f:
             pk.dump(vars, f)
 
-    print(f"saved {path} uses {os.path.getsize(path)/1024**2:.2f}MB")
+    print(f"saved {path} uses {os.path.getsize(path) / 1024**2:.2f}MB")
 
 
 def read(datadir: str, fname: str = "save.pkl") -> List[Any]:

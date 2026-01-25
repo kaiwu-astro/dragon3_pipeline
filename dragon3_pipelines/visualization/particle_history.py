@@ -592,5 +592,5 @@ class ParticleHistoryVisualizer(BaseVisualizer):
                 plt.close(fig)
 
         logger.info(
-            f"Generated {len(filtered_df)} plots for particle {particle_name} " f"in {output_dir}"
+            f"Generated {len(filtered_df)} plots for particle {particle_name} in {output_dir}"
         )

@@ -663,7 +663,7 @@ class HDF5FileProcessor:
                 for j in range(n_missing):
                     missing_time = actual_times[i] + (j + 1) * expected_diff
                     logger.warning(
-                        f"[get_all_hdf5_paths] Missing HDF5 file for time ~{missing_time:.2f} (between {actual_times[i]:.2f} and {actual_times[i+1]:.2f})"
+                        f"[get_all_hdf5_paths] Missing HDF5 file for time ~{missing_time:.2f} (between {actual_times[i]:.2f} and {actual_times[i + 1]:.2f})"
                     )
 
         return [hdf5_files[i] for i in unique_indices]
