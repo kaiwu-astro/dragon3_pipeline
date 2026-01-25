@@ -1,6 +1,7 @@
 """Physics calculations and formulae for astrophysical simulations"""
 
 from typing import Tuple
+import numpy as np
 
 # Re-export tau_gw from io module where it was already migrated
 from dragon3_pipelines.io.text_parsers import tau_gw
@@ -85,3 +86,78 @@ def compute_individual_orbit_params(
     a2 = a_bin * m1 / total_mass
 
     return (a1, ecc_bin), (a2, ecc_bin)
+
+def orbit_elements_from_state(r, v, mu):
+    """Return (a, e, i, Omega, omega) from inertial state (r,v)."""
+    r = np.asarray(r, dtype=float)
+    v = np.asarray(v, dtype=float)
+    rnorm = np.linalg.norm(r)
+    vnorm = np.linalg.norm(v)
+
+    h = np.cross(r, v)
+    hnorm = np.linalg.norm(h)
+
+    # eccentricity vector
+    e_vec = (np.cross(v, h) / mu) - (r / rnorm)
+    e = np.linalg.norm(e_vec)
+
+    # semi-major axis from vis-viva
+    a = 1.0 / (2.0 / rnorm - (vnorm * vnorm) / mu)
+
+    # inclination
+    i = np.arccos(np.clip(h[2] / hnorm, -1.0, 1.0))
+
+    # node vector
+    k = np.array([0.0, 0.0, 1.0])
+    n = np.cross(k, h)
+    nnorm = np.linalg.norm(n)
+
+    # RAAN Omega
+    if nnorm < 1e-14:
+        Omega = 0.0
+    else:
+        Omega = np.arctan2(n[1], n[0]) % (2 * np.pi)
+
+    # argument of periapsis omega
+    if e < 1e-14 or nnorm < 1e-14:
+        omega = 0.0
+    else:
+        # omega = angle from n to e_vec in orbital plane
+        cosw = np.clip(np.dot(n, e_vec) / (nnorm * e), -1.0, 1.0)
+        omega = np.arccos(cosw)
+        if e_vec[2] < 0:
+            omega = 2 * np.pi - omega
+
+    return a, e, i, Omega, omega
+
+def rot_matrix(Omega, inc, omega):
+    cO, sO = np.cos(Omega), np.sin(Omega)
+    ci, si = np.cos(inc), np.sin(inc)
+    co, so = np.cos(omega), np.sin(omega)
+
+    RzO = np.array([[ cO, -sO, 0],
+                    [ sO,  cO, 0],
+                    [  0,   0, 1]])
+    Rxi = np.array([[ 1,  0,   0],
+                    [ 0, ci, -si],
+                    [ 0, si,  ci]])
+    Rzo = np.array([[ co, -so, 0],
+                    [ so,  co, 0],
+                    [  0,   0, 1]])
+    return RzO @ Rxi @ Rzo  # PQW -> inertial
+
+def sample_relative_orbit_xy(a_rel, e, i, Omega, omega, n=600):
+    """Sample the relative orbit r_rel in inertial coords and return its xy projection arrays."""
+    nu = np.linspace(0, 2*np.pi, n)
+    p = a_rel * (1 - e*e)
+    r = p / (1 + e * np.cos(nu))
+
+    # Perifocal (PQW) coordinates
+    x_p = r * np.cos(nu)
+    y_p = r * np.sin(nu)
+    z_p = np.zeros_like(x_p)
+    rpqw = np.vstack([x_p, y_p, z_p])  # (3,n)
+
+    R = rot_matrix(Omega, i, omega)
+    rI = R @ rpqw  # inertial (3,n)
+    return rI[0], rI[1]  # xy projection
