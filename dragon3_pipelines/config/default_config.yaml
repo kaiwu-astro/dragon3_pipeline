@@ -89,11 +89,14 @@ wow_binary_st_list:
 limits:
   'Distance_to_cluster_center[pc]': [0.001, 10000.0]
   'Bin A[au]': [0.001, 100000.0]
+  'Bin A[au]_moderate': [0.001, 5000.0]
   'mass_ratio': [0.0005, 1.01]
   'M': [0.06, 1050.0]
   'Bin ECC': [0.0001, 1.2]
   'Teff*': [1000.0, 1050000.0]
   'L*': [0.000009, 100000000.0]
+  'R*': [0.0004, 2000.0] # WD - Hayashi
+  'position_pc_lim_moderate': [-7.0, 7.0]
   'position_pc_lim': [-15.0, 15.0]
   'position_pc_lim_MAX': [-500.0, 500.0]
   'Ebind/kT': [2.0e-7, 500.0]

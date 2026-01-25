@@ -7,6 +7,8 @@ from typing import Any, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import astropy.units as u
+from glob import glob
 from matplotlib.patches import Ellipse
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
@@ -16,6 +18,7 @@ from dragon3_pipelines.analysis.physics import (
 )
 from dragon3_pipelines.utils import log_time
 from dragon3_pipelines.visualization.base import BaseVisualizer, add_grid
+from dragon3_pipelines.analysis import ParticleTracker
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,8 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         super().__init__(config_manager)
         self.simu_name = simu_name
         self.particle_name = particle_name
+        self.main_axes_xylim: Optional[Tuple[float, float]] = None
+        self.is_singleton: bool = False
 
     def _filter_by_time(
         self,
@@ -107,6 +112,37 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         except Exception:
             return "gray"
 
+    def _get_marker_size(self, r_star: float) -> float:
+        """
+        Calculate marker size based on stellar radius using logarithmic scaling,
+            so that marker radius scales linearly with log10(R*).
+
+        Args:
+            r_star: Stellar radius in solar radii
+
+        Returns:
+            Marker size for matplotlib scatter plot
+        """
+        marker_size_min = 10
+        marker_size_max = 10000
+
+        r_limits = self.config.limits.get("R*", [0.0004, 2000.0])
+        r_star_min, r_star_max = r_limits[0], r_limits[-1]
+
+        # Clamp r_star to the minimum value for valid log calculation
+        r_val = max(r_star, r_star_min)
+
+        marker_size = (
+            (
+                np.sqrt(marker_size_min)
+                + (np.log10(r_val) - np.log10(r_star_min))
+                / (np.log10(r_star_max) - np.log10(r_star_min))
+                * (np.sqrt(marker_size_max) - np.sqrt(marker_size_min))
+            )
+            ** 2
+        )
+        return float(marker_size)
+
     def _plot_main_axes(self, ax: plt.Axes, row: pd.Series) -> None:
         """
         Plot the main axes showing stellar positions and orbits.
@@ -116,13 +152,17 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             row: Single row from history DataFrame
         """
         # Set up axis limits and scale
-        bin_a_limits = self.config.limits.get("Bin A[au]", (0.001, 100000.0))
-        ax.set_xlim(-bin_a_limits[1], bin_a_limits[1])
-        ax.set_ylim(-bin_a_limits[1], bin_a_limits[1])
-        ax.set_xscale("symlog", linthresh=bin_a_limits[0])
-        ax.set_yscale("symlog", linthresh=bin_a_limits[0])
-        ax.set_xlabel("X [au]")
-        ax.set_ylabel("Y [au]")
+        if self.main_axes_xylim is not None:
+            ax.set_xlim(*self.main_axes_xylim)
+            ax.set_ylim(*self.main_axes_xylim)
+            ax.set_xlabel("X [au]")
+            ax.set_ylabel("Y [au]")
+        else:
+            # hide x, y ticks, labels
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_xlabel("")
+            ax.set_ylabel("")
 
         # Determine if this is a single star or binary state
         state = row.get("state", "single")
@@ -149,10 +189,9 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         r_star = row.get("R*", 1.0)
         teff = row.get("Teff*", 5778.0)
         kw = int(row.get("KW", 1))
+        R_STAR_MAX = self.config.limits.get("R*", [0, 2000.0])[-1]
 
-        # Calculate marker size based on stellar radius
-        base_size = 100
-        marker_size = base_size * np.log10(r_star + 1) if r_star > 0 else base_size
+        marker_size = self._get_marker_size(r_star)
 
         # Get color
         color = self._get_marker_color(kw, teff)
@@ -160,17 +199,17 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         # Plot the star at origin
         ax.scatter([0], [0], s=marker_size, c=[color], edgecolors="white", linewidths=0.5, zorder=5)
 
-        # Annotate with stellar type
-        stellar_type = self.config.kw_to_stellar_type.get(kw, str(kw))
-        ax.annotate(
-            stellar_type,
-            (0, 0),
-            ha="center",
-            va="center",
-            fontsize=8,
-            color="white" if kw == 14 else "black",
-            zorder=6,
-        )
+        # # Annotate with stellar type
+        # stellar_type = self.config.kw_to_stellar_type.get(kw, str(kw))
+        # ax.annotate(
+        #     stellar_type,
+        #     (0, 0),
+        #     ha="center",
+        #     va="center",
+        #     fontsize=8,
+        #     color="white" if kw == 14 else "black",
+        #     zorder=6,
+        # )
 
     def _plot_binary_system(self, ax: plt.Axes, row: pd.Series) -> None:
         """
@@ -191,9 +230,16 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         rel_y = row.get("Bin rel X2", 0.0)
         rel_z = row.get("Bin rel X3", 0.0)
 
+        pc_to_au = u.pc.to(u.au)
+
         # Compute positions relative to center of mass
         (x1, y1, z1), (x2, y2, z2) = compute_binary_orbit_relative_positions(
-            m1, m2, rel_x, rel_y, rel_z
+            m1, m2, rel_x*pc_to_au, rel_y*pc_to_au, rel_z*pc_to_au
+        )
+
+        logger.debug(
+            f"Got binary info: {m1=}, {m2=}, {a_bin=}, {ecc_bin=}, {rel_x=}, {rel_y=}, {rel_z=}, \
+                               {x1=}, {y1=}, {x2=}, {y2=}"
         )
 
         # Get stellar properties for each component
@@ -217,27 +263,27 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         ax.scatter([x1], [y1], s=size1, c=[color1], edgecolors="white", linewidths=0.5, zorder=5)
         ax.scatter([x2], [y2], s=size2, c=[color2], edgecolors="white", linewidths=0.5, zorder=5)
 
-        # Annotate with stellar types
-        st1 = self.config.kw_to_stellar_type.get(kw1, str(kw1))
-        st2 = self.config.kw_to_stellar_type.get(kw2, str(kw2))
-        ax.annotate(
-            st1,
-            (x1, y1),
-            ha="center",
-            va="center",
-            fontsize=8,
-            color="white" if kw1 == 14 else "black",
-            zorder=6,
-        )
-        ax.annotate(
-            st2,
-            (x2, y2),
-            ha="center",
-            va="center",
-            fontsize=8,
-            color="white" if kw2 == 14 else "black",
-            zorder=6,
-        )
+        # # Annotate with stellar types
+        # st1 = self.config.kw_to_stellar_type.get(kw1, str(kw1))
+        # st2 = self.config.kw_to_stellar_type.get(kw2, str(kw2))
+        # ax.annotate(
+        #     st1,
+        #     (x1, y1),
+        #     ha="center",
+        #     va="center",
+        #     fontsize=8,
+        #     color="white" if kw1 == 14 else "black",
+        #     zorder=6,
+        # )
+        # ax.annotate(
+        #     st2,
+        #     (x2, y2),
+        #     ha="center",
+        #     va="center",
+        #     fontsize=8,
+        #     color="white" if kw2 == 14 else "black",
+        #     zorder=6,
+        # )
 
         # Compute individual orbit parameters
         (a1, e1), (a2, e2) = compute_individual_orbit_params(a_bin, ecc_bin, m1, m2)
@@ -310,16 +356,25 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             # Binary star information
             m1 = row.get("Bin M1*", np.nan)
             m2 = row.get("Bin M2*", np.nan)
+            r1 = row.get("Bin RS1*", np.nan)
+            r2 = row.get("Bin RS2*", np.nan)
+            st1 = self.config.kw_to_stellar_type.get(int(row.get("Bin KW1", 0)), "N/A")
+            st2 = self.config.kw_to_stellar_type.get(int(row.get("Bin KW2", 0)), "N/A")
             teff1 = row.get("Bin Teff1*", np.nan)
             teff2 = row.get("Bin Teff2*", np.nan)
             a_bin = row.get("Bin A[au]", np.nan)
             ecc = row.get("Bin ECC", np.nan)
             peri = a_bin * (1 - ecc) if pd.notna(a_bin) and pd.notna(ecc) else np.nan
             ebind = row.get("Ebind/kT", np.nan)
-            tau_gw = row.get("tau_gw[Myr]", np.nan)
+            _tau_gw = row.get("tau_gw[Myr]", np.nan)
+            tau_gw = _tau_gw if _tau_gw < 13799.0 else np.nan  # in processing, 13800 = inf
 
             info_lines.append(f"M1     = {_fmt_val(m1, '8.3f', ' Msun')}")
             info_lines.append(f"M2     = {_fmt_val(m2, '8.3f', ' Msun')}")
+            info_lines.append(f"R1     = {_fmt_val(r1, '8.3f', ' Rsun')}")
+            info_lines.append(f"R2     = {_fmt_val(r2, '8.3f', ' Rsun')}")
+            info_lines.append(f"Type1  = {st1:>8s}")
+            info_lines.append(f"Type2  = {st2:>8s}")
             info_lines.append(f"Teff1  = {_fmt_val(teff1, '8.0f', ' K')}")
             info_lines.append(f"Teff2  = {_fmt_val(teff2, '8.0f', ' K')}")
             info_lines.append("")
@@ -394,7 +449,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         ax_inset.axvline(0, color="gray", linewidth=0.5, alpha=0.5)
 
         # Set limits
-        pos_limits = self.config.limits.get("position_pc_lim", (-15.0, 15.0))
+        pos_limits = self.config.limits.get("position_pc_lim_moderate", (-15.0, 15.0))
         ax_inset.set_xlim(*pos_limits)
         ax_inset.set_ylim(*pos_limits)
 
@@ -403,10 +458,30 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         ax_inset.set_xlabel("X [pc]", fontsize=7, labelpad=-20)
         ax_inset.set_ylabel("Y [pc]", fontsize=7, labelpad=-25)
 
+    def _get_plot_param_from_history(self, history_df: pd.DataFrame) -> None:
+        """
+        Determine if the particle is always a single star and set plotting axis limits.
+
+        Args:
+            history_df: DataFrame containing particle history.
+        """
+        bin_cm_x1 = history_df.get("Bin cm X1")
+        is_singleton = "X1" in history_df.columns and (bin_cm_x1 is None or bin_cm_x1.isna().all())
+        
+        self.is_singleton = is_singleton
+        if is_singleton:
+            self.main_axes_xylim = None
+        else:
+            max_a_bin = history_df.get("Bin A[au]", pd.Series([1.0])).max()
+            if pd.isna(max_a_bin):
+                max_a_bin = 1.0
+            max_a_bin = min(max_a_bin, 5000.0)
+            self.main_axes_xylim = (-max_a_bin, max_a_bin)
+
     @log_time(logger)
     def plot(
         self,
-        history_df: pd.DataFrame,
+        history_df: Optional[pd.DataFrame] = None,
         time: Union[str, float, Tuple[float, float]] = "all",
         simu_name: Optional[str] = None,
         particle_name: Optional[int] = None,
@@ -428,13 +503,21 @@ class ParticleHistoryVisualizer(BaseVisualizer):
             particle_name: Optional particle name (overrides instance value)
             dpi: dpi of saved jpg
         """
-        if history_df.empty:
-            logger.warning("Empty history DataFrame provided")
-            return
 
         # Use provided values or fall back to instance values
         simu_name = simu_name or self.simu_name
         particle_name = particle_name or self.particle_name
+
+        if history_df is None or history_df.empty:
+            # read from particle history file
+                    # Build path from simu_name and particle_name
+            particle_tracker = ParticleTracker(self.config)
+            history_df = particle_tracker.read_history(
+                simu_name=simu_name, 
+                particle_name=particle_name
+                )
+            
+        self._get_plot_param_from_history(history_df)
 
         if particle_name is None:
             # Try to extract from DataFrame
