@@ -14,11 +14,6 @@ from scipy.spatial import cKDTree
 import astropy.constants as constants
 import astropy.units as u
 
-try:
-    import lz4
-except ImportError:
-    pass
-
 from dragon3_pipelines.utils import log_time
 
 logger = logging.getLogger(__name__)

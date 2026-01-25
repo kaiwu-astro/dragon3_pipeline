@@ -11,11 +11,6 @@ import pandas as pd
 from rich.progress import Progress, track
 from glob import glob
 
-try:
-    import lz4
-except ImportError:
-    pass
-
 from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
 

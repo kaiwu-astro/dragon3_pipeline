@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 
 def set_mpl_fonts() -> None:
     """Configure matplotlib fonts and styling for plots."""
-    SMALL_SIZE = 8
-    MEDIUM_SIZE = 10
+    # SMALL_SIZE = 8
+    # MEDIUM_SIZE = 10
     BIGGER_SIZE = 15
     plt.rc("mathtext", fontset="dejavuserif")
     plt.rc("font", family="serif")
@@ -47,7 +47,7 @@ def add_grid(axs: Union[plt.Axes, List[plt.Axes]], which: str = "both", axis: st
     try:
         axs[0]
         axes = axs
-    except:
+    except Exception:
         axes = [
             axs,
         ]

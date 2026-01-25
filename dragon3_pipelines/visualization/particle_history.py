@@ -203,7 +203,7 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         r_star = row.get("R*", 1.0)
         teff = row.get("Teff*", 5778.0)
         kw = int(row.get("KW", 1))
-        R_STAR_MAX = self.config.limits.get("R*", [0, 2000.0])[-1]
+        self.config.limits.get("R*", [0, 2000.0])[-1]
 
         marker_size = self._get_marker_size(r_star)
 
