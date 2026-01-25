@@ -87,8 +87,25 @@ def compute_individual_orbit_params(
 
     return (a1, ecc_bin), (a2, ecc_bin)
 
-def orbit_elements_from_state(r, v, mu):
-    """Return (a, e, i, Omega, omega) from inertial state (r,v)."""
+def orbit_elements_from_state(
+    r: np.ndarray, v: np.ndarray, mu: float
+) -> Tuple[float, float, float, float, float]:
+    """
+    Compute Keplerian orbital elements from state vector (r, v).
+
+    Args:
+        r: Position vector [3-element array]
+        v: Velocity vector [3-element array]
+        mu: Standard gravitational parameter (G * total_mass)
+
+    Returns:
+        Tuple containing (a, e, i, Omega, omega):
+            - a: Semi-major axis
+            - e: Eccentricity
+            - i: Inclination [radians]
+            - Omega: Longitude of ascending node [radians]
+            - omega: Argument of periapsis [radians]
+    """
     r = np.asarray(r, dtype=float)
     v = np.asarray(v, dtype=float)
     rnorm = np.linalg.norm(r)
@@ -130,7 +147,19 @@ def orbit_elements_from_state(r, v, mu):
 
     return a, e, i, Omega, omega
 
-def rot_matrix(Omega, inc, omega):
+
+def rot_matrix(Omega: float, inc: float, omega: float) -> np.ndarray:
+    """
+    Compute the rotation matrix from perifocal (PQW) to inertial coordinates.
+
+    Args:
+        Omega: Longitude of ascending node [radians]
+        inc: Inclination [radians]
+        omega: Argument of periapsis [radians]
+
+    Returns:
+        3x3 rotation matrix (PQW -> inertial)
+    """
     cO, sO = np.cos(Omega), np.sin(Omega)
     ci, si = np.cos(inc), np.sin(inc)
     co, so = np.cos(omega), np.sin(omega)
@@ -146,10 +175,25 @@ def rot_matrix(Omega, inc, omega):
                     [  0,   0, 1]])
     return RzO @ Rxi @ Rzo  # PQW -> inertial
 
-def sample_relative_orbit_xy(a_rel, e, i, Omega, omega, n=600):
-    """Sample the relative orbit r_rel in inertial coords and return its xy projection arrays."""
-    nu = np.linspace(0, 2*np.pi, n)
-    p = a_rel * (1 - e*e)
+def sample_relative_orbit_xy(
+    a_rel: float, e: float, i: float, Omega: float, omega: float, n: int = 600
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Sample the relative orbit in inertial coordinates and return its xy projection.
+
+    Args:
+        a_rel: Semi-major axis of the relative orbit
+        e: Eccentricity
+        i: Inclination [radians]
+        Omega: Longitude of ascending node [radians]
+        omega: Argument of periapsis [radians]
+        n: Number of points to sample
+
+    Returns:
+        Tuple of (x_points, y_points) representing the projected orbit
+    """
+    nu = np.linspace(0, 2 * np.pi, n)
+    p = a_rel * (1 - e * e)
     r = p / (1 + e * np.cos(nu))
 
     # Perifocal (PQW) coordinates
