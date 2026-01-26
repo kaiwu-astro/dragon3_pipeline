@@ -526,13 +526,17 @@ class ParticleHistoryVisualizer(BaseVisualizer):
         simu_name = simu_name or self.simu_name
         particle_name = particle_name or self.particle_name
 
-        if history_df is None or history_df.empty:
+        if history_df is None:
             # read from particle history file
             # Build path from simu_name and particle_name
             particle_tracker = ParticleTracker(self.config)
             history_df = particle_tracker.read_history(
                 simu_name=simu_name, particle_name=particle_name
             )
+
+        if history_df.empty:
+            logger.warning("Empty DataFrame provided, returning early")
+            return
 
         self._get_plot_param_from_history(history_df)
 
