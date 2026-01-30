@@ -576,24 +576,25 @@ class ParticleHistoryVisualizer(BaseVisualizer):
                 continue
 
             # Create figure
-            fig, ax = plt.subplots(figsize=(8, 8))
+            with plt.style.context("dark_background"):
+                fig, ax = plt.subplots(figsize=(8, 8))
 
-            # Plot components
-            self._plot_main_axes(ax, row)
-            self._annotate_info(ax, row)
-            self._plot_inset_axes(ax, row)
+                # Plot components
+                self._plot_main_axes(ax, row)
+                self._annotate_info(ax, row)
+                self._plot_inset_axes(ax, row)
 
-            # Save figure
-            fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
-            logger.debug(f"Saved plot: {output_path}")
+                # Save figure
+                fig.savefig(output_path, dpi=dpi, bbox_inches="tight")
+                logger.debug(f"Saved plot: {output_path}")
 
-            # Close figure to free memory
-            try:
-                __IPYTHON__
-                if self.config.close_figure_in_ipython or not isinstance(time, (int, float)):
+                # Close figure to free memory
+                try:
+                    __IPYTHON__
+                    if self.config.close_figure_in_ipython or not isinstance(time, (int, float)):
+                        plt.close(fig)
+                except NameError:
                     plt.close(fig)
-            except NameError:
-                plt.close(fig)
 
         logger.info(
             f"Generated {len(filtered_df)} plots for particle {particle_name} in {output_dir}"
