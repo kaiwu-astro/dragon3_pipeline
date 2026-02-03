@@ -25,7 +25,7 @@ class ContinousFileProcessor:
         """Concatenate all files with the given basename into a temporary file"""
         gather_file_cmd = (
             f"cd {self.config.pathof[simu_name]};"
-            + f"""tmpf=`mktemp --suffix=.{self.file_basename}`; find . -name '{self.file_basename}*' | xargs ls | xargs cat > $tmpf; echo $tmpf"""
+            + f"""tmpf=`mktemp --suffix=.{self.file_basename}`; find -L . -name '{self.file_basename}*' | xargs ls | xargs cat > $tmpf; echo $tmpf"""
         )
         self.file_path = get_output(gather_file_cmd)[0]
         logger.debug(f"Gathered {self.file_basename} of {simu_name} files into {self.file_path}")
@@ -67,9 +67,9 @@ class ContinousFileProcessor:
         from dragon3_pipelines.io.text_parsers import get_scale_dict
 
         if simu_name not in self.scale_dict_of:
-            first_output_file_path = glob(
-                self.config.pathof[simu_name] + "/" + self.firstjobhere(simu_name) + "/N*out"
-            )[0]
+            all_output_files = glob(self.config.pathof[simu_name] + "/**/N*out", recursive=True)
+            sorted_output_files = sorted(all_output_files, key=lambda x: int(x.split(".")[-2]))
+            first_output_file_path = sorted_output_files[0]
             self.scale_dict_of[simu_name] = get_scale_dict(first_output_file_path)
             print(f"Got {self.scale_dict_of[simu_name]} from {first_output_file_path}")
         return self.scale_dict_of[simu_name]
