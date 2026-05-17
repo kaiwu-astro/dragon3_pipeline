@@ -47,6 +47,13 @@ class LagrVisualizer(BaseContinousFileVisualizer):
             "vrot": "Mass weighted\nrotational velocity [km/s]",
         }
 
+    @staticmethod
+    def _normalize_lagr_percent(percent: Any) -> str:
+        """Normalize configured Lagrangian percent values to plotted labels."""
+        if isinstance(percent, str):
+            return percent
+        return f"{percent}%"
+
     def create_lagr_plot_base(
         self,
         l7df_sns: pd.DataFrame,
@@ -71,26 +78,37 @@ class LagrVisualizer(BaseContinousFileVisualizer):
             )
         else:
             save_pdf_path = f"{self.config.plot_dir}/{self.config.figname_prefix[simu_name]}_{metric}_{filename_suffix}.pdf"
+        selected_lagr_percent = [
+            self._normalize_lagr_percent(percent) for percent in self.config.selected_lagr_percent
+        ]
         l7df_sns_selected_metric = l7df_sns[
-            (l7df_sns["Metric"] == metric) & (l7df_sns["%"].isin(self.config.selected_lagr_percent))
+            (l7df_sns["Metric"] == metric) & (l7df_sns["%"].isin(selected_lagr_percent))
         ]
         l7df_sns_selected_metric = l7df_sns_selected_metric[
             l7df_sns_selected_metric["Time[Myr]"] > 0
         ]
-        ax = sns.lineplot(data=l7df_sns_selected_metric, x="Time[Myr]", y="Value", hue="%")
+        fig, ax = plt.subplots()
+        sns.lineplot(
+            data=l7df_sns_selected_metric,
+            x="Time[Myr]",
+            y="Value",
+            hue="%",
+            hue_order=selected_lagr_percent,
+            ax=ax,
+        )
         ax.set(yscale="log", ylabel=self.metric_to_plot_label[metric], title=simu_name)
         if extra_ax_handler is not None:
             extra_ax_handler(ax)
 
         sns.move_legend(ax, "upper left", bbox_to_anchor=(1, 1))
         add_grid(ax)
-        ax.figure.savefig(save_pdf_path)
+        fig.savefig(save_pdf_path)
         try:
             __IPYTHON__
             if self.config.close_figure_in_ipython:
-                plt.close(ax.figure)
+                plt.close(fig)
         except NameError:
-            plt.close(ax.figure)
+            plt.close(fig)
 
     def _extra_ax_handler_rlagr(self, ax: plt.Axes) -> None:
         """Set y-limits for rlagr plots"""

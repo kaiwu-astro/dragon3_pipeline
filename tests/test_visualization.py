@@ -2,21 +2,12 @@
 Tests for dragon3_pipelines.visualization module
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from unittest.mock import Mock, patch
-
-
-# Mock BlackbodyColorConverter before importing visualization modules
-@pytest.fixture(autouse=True)
-def mock_color_converter():
-    """Mock BlackbodyColorConverter for all tests"""
-    with patch("dragon3_pipelines.visualization.base.BlackbodyColorConverter") as mock:
-        mock.return_value.get_rgb = Mock(return_value=np.array([[0.5, 0.5, 0.5]]))
-        yield mock
-
 
 from dragon3_pipelines.visualization import (
     BaseVisualizer,
@@ -29,6 +20,14 @@ from dragon3_pipelines.visualization import (
     set_mpl_fonts,
     add_grid,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_color_converter():
+    """Mock BlackbodyColorConverter for all tests"""
+    with patch("dragon3_pipelines.visualization.base.BlackbodyColorConverter") as mock:
+        mock.return_value.get_rgb = Mock(return_value=np.array([[0.5, 0.5, 0.5]]))
+        yield mock
 
 
 @pytest.fixture
@@ -306,6 +305,44 @@ class TestLagrVisualizer:
         except Exception:
             # Some plotting functions might fail in headless environment
             pass
+
+    def test_lagr_plots_do_not_accumulate_lines_between_metrics(
+        self, monkeypatch, mock_config, temp_dir
+    ):
+        """Each Lagrangian plot should be drawn on a fresh figure."""
+        import dragon3_pipelines.visualization.lagrangian as lagrangian_module
+
+        mock_config.plot_dir = str(temp_dir)
+        mock_config.close_figure_in_ipython = False
+        monkeypatch.setattr(lagrangian_module, "__IPYTHON__", True, raising=False)
+
+        times = [1.0, 2.0]
+        data = []
+        for metric in ["rlagr", "avmass"]:
+            for time in times:
+                for pct in ["10%", "50%", "90%"]:
+                    data.append(
+                        {
+                            "Time[Myr]": time,
+                            "%": pct,
+                            "Metric": metric,
+                            "Value": float(time),
+                        }
+                    )
+        lagr_df = pd.DataFrame(data)
+
+        plt.close("all")
+        vis = LagrVisualizer(mock_config)
+        vis.create_lagr_plot_base(lagr_df, "test_sim", metric="rlagr")
+        vis.create_lagr_plot_base(lagr_df, "test_sim", metric="avmass")
+
+        figs = [plt.figure(num) for num in plt.get_fignums()]
+        assert len(figs) == 2
+        data_line_counts = [
+            sum(line.get_label().startswith("_child") for line in fig.axes[0].lines) for fig in figs
+        ]
+        assert data_line_counts == [3, 3]
+        plt.close("all")
 
 
 class TestCollCoalVisualizer:
