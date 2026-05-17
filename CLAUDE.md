@@ -121,8 +121,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 def process_data(
-    df: pd.DataFrame, 
-    threshold: float, 
+    df: pd.DataFrame,
+    threshold: float,
     columns: Optional[List[str]] = None
 ) -> Dict[str, pd.DataFrame]:
     """处理数据并返回结果字典"""
@@ -307,10 +307,10 @@ def get_data_with_cache(cache_path: Path) -> pd.DataFrame:
     if cache_path.exists():
         logger.info(f"Loading from cache: {cache_path}")
         return pd.read_feather(cache_path)
-    
+
     # 计算数据
     df = compute_expensive_data()
-    
+
     # 保存缓存
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_feather(cache_path)
@@ -350,7 +350,7 @@ class DataProcessor:
     def __init__(self, config):
         self.config = config
         logger.info(f"Initialized DataProcessor with config: {config}")
-    
+
     @log_time(logger)
     def process_all_files(self, file_list):
         """处理所有文件，自动记录时间"""
@@ -368,6 +368,3 @@ class DataProcessor:
 - **禁止提交包含敏感信息的文件**（如 API 密钥、私有路径等）
 - **禁止跳过类型注解**（所有公共函数必须有类型标注）
 - **禁止使用未经测试的新依赖库**（添加新依赖前应评估必要性和兼容性）
-
-## 额外要求
-与用户交互时，称呼用户为“开老师”
