@@ -49,6 +49,14 @@ selected_lagr_percent:
   - "90%"
   - "95%"
 
+# Current-mass Lagrangian radii built from HDF5 snapshots
+current_lagrangian:
+  enabled: true
+  sample_every_nb_time: 1.0
+  wait_age_hour: 24
+  use_hdf5_cache: true
+  cache_filename: "current_mass_lagr.feather"
+
 # Physical constants and thresholds
 physics:
   ECLOSE_INPUT: 1.0  # Binding energy per unit mass for hard binary (positive)

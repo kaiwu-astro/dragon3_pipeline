@@ -165,10 +165,10 @@ class LagrVisualizer(BaseContinousFileVisualizer):
         fig, ax = plt.subplots()
         sns.lineplot(data=total_mass_df, x="Time[Myr]", y="total_mass", ax=ax)
         ax.set(
-            yscale="log",
             ylabel=self.metric_to_plot_label["total_mass"],
             title=simu_name,
         )
+        ax.set_ylim(bottom=0)
         add_grid(ax)
         fig.savefig(save_pdf_path)
         try:

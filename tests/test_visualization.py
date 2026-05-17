@@ -376,6 +376,7 @@ class TestLagrVisualizer:
         assert data_lines[0].get_xdata().tolist() == [1.0, 2.0]
         assert data_lines[0].get_ydata().tolist() == [20.0, 60.0]
         assert ax.get_ylabel() == "Total mass [Msolar]"
+        assert ax.get_ylim()[0] == 0
         assert (temp_dir / "test__total_mass.pdf").exists()
         plt.close("all")
 

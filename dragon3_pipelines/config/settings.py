@@ -95,6 +95,7 @@ class ConfigManager:
 
         # Lagrangian radii
         self.selected_lagr_percent: List[str] = config["selected_lagr_percent"]
+        self.current_lagrangian: Dict[str, Any] = config["current_lagrangian"]
 
         # Physics constants
         phys = config["physics"]
@@ -150,6 +151,9 @@ class ConfigManager:
                 self.mem_max_gb = proc["mem_max_gb"]
             if "inode_limit" in proc:
                 self.inode_limit = proc["inode_limit"]
+
+        if "current_lagrangian" in user_config:
+            self.current_lagrangian.update(user_config["current_lagrangian"])
 
     def _setup_derived_attributes(self) -> None:
         """Set up derived attributes that depend on configuration"""

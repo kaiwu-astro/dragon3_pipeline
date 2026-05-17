@@ -7,7 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dragon3_pipelines.analysis import ParticleTracker, tau_gw
+from dragon3_pipelines.__main__ import SimulationPlotter
+from dragon3_pipelines.analysis import CurrentMassLagrangianProcessor, ParticleTracker, tau_gw
 
 
 class TestParticleTracker:
@@ -548,3 +549,196 @@ class TestBinaryOrbitFunctions:
         assert a2 == 0.0
         assert e1 == pytest.approx(0.5)
         assert e2 == pytest.approx(0.5)
+
+
+class TestCurrentMassLagrangianProcessor:
+    """Tests for current-mass Lagrangian processing."""
+
+    @pytest.fixture
+    def mock_config(self, tmp_path):
+        config = Mock()
+        config.particle_df_cache_dir_of = {"test_simu": str(tmp_path / "cache")}
+        config.pathof = {"test_simu": str(tmp_path)}
+        config.current_lagrangian = {
+            "enabled": True,
+            "sample_every_nb_time": 1.0,
+            "wait_age_hour": 0,
+            "use_hdf5_cache": True,
+            "cache_filename": "current_mass_lagr.feather",
+        }
+        return config
+
+    def test_compute_snapshot_uses_current_mass_weighting(self, mock_config):
+        processor = CurrentMassLagrangianProcessor(mock_config)
+        singles = pd.DataFrame(
+            {
+                "M": [1.0, 4.0, 5.0],
+                "Distance_to_cluster_center[pc]": [1.0, 2.0, 3.0],
+                "X [pc]": [1.0, 2.0, 3.0],
+                "Y [pc]": [0.0, 0.0, 0.0],
+                "Z [pc]": [0.0, 0.0, 0.0],
+                "V1": [0.0, 10.0, 0.0],
+                "V2": [0.0, 0.0, 0.0],
+                "V3": [0.0, 0.0, 0.0],
+            }
+        )
+        scalar = pd.Series({"TTOT": 1.0, "Time[Myr]": 10.0, "RC": 1.0, "RBAR": 2.0})
+
+        row = processor.compute_snapshot(singles, scalar)
+
+        assert row["rlagr5.00E-01"] == pytest.approx(2.0)
+        assert row["avmass5.00E-01"] == pytest.approx(2.5)
+        assert row["nshell5.00E-01"] == 2
+        assert row["rlagr1.00E+00"] == pytest.approx(3.0)
+        assert row["avmass1.00E+00"] == pytest.approx(10.0 / 3.0)
+        assert row["nshell1.00E+00"] == 3
+        assert row["rlagr<RC"] == pytest.approx(2.0)
+        assert row["nshell<RC"] == 2
+        assert row["vx5.00E-01"] == pytest.approx(4.0)
+        assert row["sigma25.00E-01"] == pytest.approx(16.0)
+
+    def test_update_writes_cache_and_skips_fresh_files(self, mock_config, tmp_path):
+        processor = CurrentMassLagrangianProcessor(mock_config)
+        hdf5_path = tmp_path / "snap.40_1.0.h5part"
+        hdf5_path.touch()
+        scalars = pd.DataFrame(
+            {"TTOT": [1.0], "Time[Myr]": [10.0], "RC": [1.0], "RBAR": [2.0]}
+        ).set_index("TTOT", drop=False)
+        singles = pd.DataFrame(
+            {
+                "M": [1.0, 1.0],
+                "Distance_to_cluster_center[pc]": [1.0, 2.0],
+                "X [pc]": [1.0, 2.0],
+                "Y [pc]": [0.0, 0.0],
+                "Z [pc]": [0.0, 0.0],
+                "V1": [0.0, 0.0],
+                "V2": [0.0, 0.0],
+                "V3": [0.0, 0.0],
+                "TTOT": [1.0, 1.0],
+            }
+        )
+        df_dict = {"scalars": scalars, "singles": singles, "binaries": pd.DataFrame()}
+
+        processor.hdf5_file_processor.get_all_hdf5_paths = Mock(return_value=[str(hdf5_path)])
+        processor.hdf5_file_processor.read_file = Mock(return_value=df_dict)
+        processor.hdf5_file_processor.get_snapshot_at_t = Mock(
+            return_value=(singles, pd.DataFrame({"should_not_be_used": [1]}), True)
+        )
+
+        first = processor.update("test_simu")
+        second = processor.update("test_simu")
+
+        assert len(first) == 1
+        assert len(second) == 1
+        assert processor.hdf5_file_processor.read_file.call_count == 1
+        assert (tmp_path / "cache" / "current_lagrangian" / "current_mass_lagr.feather").exists()
+        assert (tmp_path / "cache" / "current_lagrangian" / "current_mass_lagr.meta.json").exists()
+
+    def test_update_can_insert_intermediate_time(self, mock_config, tmp_path):
+        processor = CurrentMassLagrangianProcessor(mock_config)
+        paths = [tmp_path / "snap.40_1.0.h5part", tmp_path / "snap.40_0.5.h5part"]
+        for path in paths:
+            path.touch()
+
+        def make_df_dict(ttot):
+            scalars = pd.DataFrame(
+                {"TTOT": [ttot], "Time[Myr]": [ttot * 10], "RC": [1.0], "RBAR": [2.0]}
+            ).set_index("TTOT", drop=False)
+            singles = pd.DataFrame(
+                {
+                    "M": [1.0],
+                    "Distance_to_cluster_center[pc]": [1.0],
+                    "X [pc]": [1.0],
+                    "Y [pc]": [0.0],
+                    "Z [pc]": [0.0],
+                    "V1": [0.0],
+                    "V2": [0.0],
+                    "V3": [0.0],
+                    "TTOT": [ttot],
+                }
+            )
+            return {"scalars": scalars, "singles": singles, "binaries": pd.DataFrame()}
+
+        processor.hdf5_file_processor.get_all_hdf5_paths = Mock(return_value=[str(paths[0])])
+        processor.hdf5_file_processor.read_file = Mock(return_value=make_df_dict(1.0))
+        processor.hdf5_file_processor.get_snapshot_at_t = Mock(
+            side_effect=lambda df_dict, ttot: (
+                df_dict["singles"],
+                pd.DataFrame(),
+                True,
+            )
+        )
+        processor.update("test_simu")
+
+        processor.hdf5_file_processor.get_all_hdf5_paths = Mock(
+            return_value=[str(paths[1]), str(paths[0])]
+        )
+        processor.hdf5_file_processor.read_file = Mock(
+            side_effect=lambda path, *_args, **_kwargs: make_df_dict(0.5 if "0.5" in path else 1.0)
+        )
+        updated = processor.update("test_simu")
+
+        assert updated["Time[NB]"].tolist() == [0.5, 1.0]
+
+    def test_load_sns_friendly_drops_time_nb_and_adds_sigma(self, mock_config):
+        processor = CurrentMassLagrangianProcessor(mock_config)
+        processor.update = Mock(
+            return_value=pd.DataFrame(
+                {
+                    "Time[NB]": [1.0],
+                    "Time[Myr]": [10.0],
+                    "sigma21.00E+00": [4.0],
+                    "rlagr1.00E+00": [2.0],
+                }
+            )
+        )
+
+        result = processor.load_sns_friendly_data("test_simu")
+
+        assert "Time[NB]" not in result.columns
+        assert "sigma" in set(result["Metric"])
+        assert result.loc[result["Metric"] == "sigma", "Value"].iloc[0] == pytest.approx(2.0)
+
+
+class TestSimulationPlotterCurrentLagrangian:
+    """Integration tests for current-mass Lagrangian plotter wiring."""
+
+    def test_plot_all_simulations_calls_current_lagrangian_when_enabled(self, tmp_path):
+        config = Mock()
+        config.pathof = {"test_simu": str(tmp_path)}
+        config.current_lagrangian = {"enabled": True}
+        config.processes_count = 1
+        config.tasks_per_child = 1
+        config.particle_df_cache_dir_of = {"test_simu": str(tmp_path / "cache")}
+
+        class FakePool:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def imap(self, func, iterable):
+                return iter(())
+
+        class FakeContext:
+            def Pool(self, **_kwargs):
+                return FakePool()
+
+        with (
+            patch.object(
+                SimulationPlotter, "__init__", lambda self, cfg: setattr(self, "config", cfg)
+            ),
+            patch.object(SimulationPlotter, "plot_lagr") as plot_lagr,
+            patch.object(SimulationPlotter, "plot_current_mass_lagr") as plot_current,
+            patch(
+                "dragon3_pipelines.__main__.multiprocessing.get_context", return_value=FakeContext()
+            ),
+        ):
+            plotter = SimulationPlotter(config)
+            plotter.hdf5_file_processor = Mock()
+            plotter.hdf5_file_processor.get_all_hdf5_paths.return_value = []
+            plotter.plot_all_simulations()
+
+        plot_lagr.assert_called_once_with("test_simu")
+        plot_current.assert_called_once_with("test_simu")

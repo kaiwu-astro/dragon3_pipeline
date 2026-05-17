@@ -21,7 +21,7 @@ from rich.logging import RichHandler
 from dragon3_pipelines.config import ConfigManager
 from dragon3_pipelines.io import HDF5FileProcessor, LagrFileProcessor
 from dragon3_pipelines.visualization import HDF5Visualizer, LagrVisualizer
-from dragon3_pipelines.analysis import ParticleTracker
+from dragon3_pipelines.analysis import CurrentMassLagrangianProcessor, ParticleTracker
 
 # Setup logger
 try:
@@ -41,6 +41,7 @@ class SimulationPlotter:
         self.hdf5_visualizer = HDF5Visualizer(config_manager)
         self.lagr_visualizer = LagrVisualizer(config_manager)
         self.particle_tracker = ParticleTracker(config_manager)
+        self.current_lagrangian_processor = CurrentMassLagrangianProcessor(config_manager)
 
     def plot_hdf5_file(self, hdf5_file_path: str, simu_name: str) -> None:
         """处理单个HDF5文件（包含多个snapshot）
@@ -163,11 +164,64 @@ class SimulationPlotter:
         plt.close("all")
         gc.collect()
 
+    def plot_current_mass_lagr(self, simu_name: str) -> None:
+        """处理基于HDF5 snapshot当前质量的Lagrangian半径数据"""
+        l7df_sns = self.current_lagrangian_processor.load_sns_friendly_data(simu_name, update=True)
+        if l7df_sns.empty:
+            logger.info(f"No current-mass Lagrangian data for {simu_name}, skipping plots")
+            return
+        self.lagr_visualizer.create_lagr_plot_base(
+            l7df_sns,
+            simu_name,
+            metric="rlagr",
+            filename_suffix="current_mass",
+            extra_ax_handler=self.lagr_visualizer._extra_ax_handler_rlagr,
+        )
+        self.lagr_visualizer.create_lagr_plot_base(
+            l7df_sns,
+            simu_name,
+            metric="rlagr",
+            filename_suffix="loglog_current_mass",
+            extra_ax_handler=self.lagr_visualizer._extra_ax_handler_rlagr_logx,
+        )
+        self.lagr_visualizer.create_lagr_plot_base(
+            l7df_sns,
+            simu_name,
+            metric="avmass",
+            filename_suffix="current_mass",
+            extra_ax_handler=self.lagr_visualizer._extra_ax_handler_avmass,
+        )
+        self.lagr_visualizer.create_lagr_plot_base(
+            l7df_sns,
+            simu_name,
+            metric="avmass",
+            filename_suffix="loglog_current_mass",
+            extra_ax_handler=self.lagr_visualizer._extra_ax_handler_avmass_logx,
+        )
+        self.lagr_visualizer.create_lagr_plot_base(
+            l7df_sns,
+            simu_name,
+            metric="sigma",
+            filename_suffix="current_mass",
+            extra_ax_handler=self.lagr_visualizer._extra_ax_handler_sigma,
+        )
+        self.lagr_visualizer.create_lagr_plot_base(
+            l7df_sns,
+            simu_name,
+            metric="sigma",
+            filename_suffix="loglog_current_mass",
+            extra_ax_handler=self.lagr_visualizer._extra_ax_handler_sigma_logx,
+        )
+        plt.close("all")
+        gc.collect()
+
     def plot_all_simulations(self) -> None:
         """处理所有模拟"""
         for simu_name in self.config.pathof.keys():
             # 先画lagr
             self.plot_lagr(simu_name)
+            if self.config.current_lagrangian.get("enabled", True):
+                self.plot_current_mass_lagr(simu_name)
 
             # 获取所有HDF5文件
             hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)
