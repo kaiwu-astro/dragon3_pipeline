@@ -32,6 +32,7 @@ class LagrVisualizer(BaseContinousFileVisualizer):
             "rlagr_b": "Lagrangian radii of binary stars [pc]",
             "avmass": "Average mass [Msolar]",
             "nshell": "Number of stars",
+            "total_mass": "Total mass [Msolar]",
             "vx": "Mass weighted X velocity [km/s]",
             "vy": "Mass weighted Y velocity [km/s]",
             "vz": "Mass weighted Z velocity [km/s]",
@@ -140,6 +141,42 @@ class LagrVisualizer(BaseContinousFileVisualizer):
         """Combined handler for velocity dispersion with log x-axis"""
         self._extra_ax_handler_sigma(ax)
         self._extra_ax_handler_logx(ax)
+
+    def create_total_mass_plot(self, l7df_sns: pd.DataFrame, simu_name: str) -> None:
+        """Create total mass plot from 100% average mass and shell count."""
+        save_pdf_path = (
+            f"{self.config.plot_dir}/{self.config.figname_prefix[simu_name]}_total_mass.pdf"
+        )
+
+        percent = "100%"
+        avmass = l7df_sns[(l7df_sns["Metric"] == "avmass") & (l7df_sns["%"] == percent)]
+        nshell = l7df_sns[(l7df_sns["Metric"] == "nshell") & (l7df_sns["%"] == percent)]
+
+        total_mass_df = pd.merge(
+            avmass[["Time[Myr]", "Value"]],
+            nshell[["Time[Myr]", "Value"]],
+            on="Time[Myr]",
+            how="inner",
+            suffixes=("_avmass", "_nshell"),
+        )
+        total_mass_df = total_mass_df[total_mass_df["Time[Myr]"] > 0].copy()
+        total_mass_df["total_mass"] = total_mass_df["Value_avmass"] * total_mass_df["Value_nshell"]
+
+        fig, ax = plt.subplots()
+        sns.lineplot(data=total_mass_df, x="Time[Myr]", y="total_mass", ax=ax)
+        ax.set(
+            yscale="log",
+            ylabel=self.metric_to_plot_label["total_mass"],
+            title=simu_name,
+        )
+        add_grid(ax)
+        fig.savefig(save_pdf_path)
+        try:
+            __IPYTHON__
+            if self.config.close_figure_in_ipython:
+                plt.close(fig)
+        except NameError:
+            plt.close(fig)
 
     def create_lagr_radii_plot(self, l7df_sns: pd.DataFrame, simu_name: str) -> None:
         """Create Lagrangian radii plots (both linear and log-log)"""

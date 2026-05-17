@@ -344,6 +344,41 @@ class TestLagrVisualizer:
         assert data_line_counts == [3, 3]
         plt.close("all")
 
+    def test_create_total_mass_plot_uses_100_percent_avmass_and_nshell(
+        self, monkeypatch, mock_config, temp_dir
+    ):
+        """Total mass should be avmass * nshell for the 100% shell only."""
+        import dragon3_pipelines.visualization.lagrangian as lagrangian_module
+
+        mock_config.plot_dir = str(temp_dir)
+        mock_config.close_figure_in_ipython = False
+        monkeypatch.setattr(lagrangian_module, "__IPYTHON__", True, raising=False)
+
+        lagr_df = pd.DataFrame(
+            [
+                {"Time[Myr]": 1.0, "%": "100%", "Metric": "avmass", "Value": 2.0},
+                {"Time[Myr]": 2.0, "%": "100%", "Metric": "avmass", "Value": 3.0},
+                {"Time[Myr]": 1.0, "%": "100%", "Metric": "nshell", "Value": 10.0},
+                {"Time[Myr]": 2.0, "%": "100%", "Metric": "nshell", "Value": 20.0},
+                {"Time[Myr]": 1.0, "%": "90%", "Metric": "avmass", "Value": 100.0},
+                {"Time[Myr]": 1.0, "%": "90%", "Metric": "nshell", "Value": 100.0},
+            ]
+        )
+
+        plt.close("all")
+        vis = LagrVisualizer(mock_config)
+        vis.create_total_mass_plot(lagr_df, "test_sim")
+
+        fig = plt.figure(plt.get_fignums()[0])
+        ax = fig.axes[0]
+        data_lines = [line for line in ax.lines if line.get_label().startswith("_child")]
+        assert len(data_lines) == 1
+        assert data_lines[0].get_xdata().tolist() == [1.0, 2.0]
+        assert data_lines[0].get_ydata().tolist() == [20.0, 60.0]
+        assert ax.get_ylabel() == "Total mass [Msolar]"
+        assert (temp_dir / "test__total_mass.pdf").exists()
+        plt.close("all")
+
 
 class TestCollCoalVisualizer:
     """Test CollCoalVisualizer class"""

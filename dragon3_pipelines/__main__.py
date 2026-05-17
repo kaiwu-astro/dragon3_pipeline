@@ -158,6 +158,7 @@ class SimulationPlotter:
         l7df_sns = self.lagr_file_processor.load_sns_friendly_data(simu_name)
         self.lagr_visualizer.create_lagr_radii_plot(l7df_sns, simu_name)
         self.lagr_visualizer.create_lagr_avmass_plot(l7df_sns, simu_name)
+        self.lagr_visualizer.create_total_mass_plot(l7df_sns, simu_name)
         self.lagr_visualizer.create_lagr_velocity_dispersion_plot(l7df_sns, simu_name)
         plt.close("all")
         gc.collect()
