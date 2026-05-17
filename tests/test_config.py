@@ -123,5 +123,13 @@ class TestConfigManager:
         assert isinstance(config.colname_to_label, dict)
         assert len(config.colname_to_label) > 0
 
-        # Check specific limits
-        assert "Bin A [au]" in config.limits or "Bin A au" in config.limits
+        # Config keys should match DataFrame column names exactly.
+        assert "Bin A[au]" in config.limits
+        assert "Distance_to_cluster_center[pc]" in config.limits
+        assert "mass_ratio" in config.limits
+        assert "Bin A[au]" in config.colname_to_label
+
+        # Guard against reintroducing implicit key formatting.
+        assert "Bin A [au]" not in config.limits
+        assert "Bin A au" not in config.limits
+        assert "Distance to cluster center [pc]" not in config.limits
