@@ -114,18 +114,6 @@ class ConfigManager:
         # Binary types
         self.wow_binary_st_list: List[str] = config["wow_binary_st_list"]
 
-        # Limits
-        self.limits: Dict[str, Tuple[float, float]] = {
-            k.replace("_", " ").replace("[", " [").replace("]", "]"): tuple(v)
-            for k, v in config["limits"].items()
-        }
-
-        # Column labels
-        self.colname_to_label: Dict[str, str] = {
-            k.replace("_", " ").replace("[", " [").replace("]", "]"): v
-            for k, v in config["column_labels"].items()
-        }
-
         # Fixed width font context
         self.fixed_width_font_context: Dict[str, Any] = {"rc": {"font.family": "monospace"}}
 

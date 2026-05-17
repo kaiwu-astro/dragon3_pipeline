@@ -6,16 +6,16 @@ paths:
     "0sb": "/p/scratch/madnuc/wu13/mar17-dragon3-start/00softBinary-5hardBinary"
     "20sb": "/p/scratch/madnuc/wu13/mar17-dragon3-start/20softBinary-5hardBinary"
     "60sb": "/p/scratch/madnuc/wu13/mar17-dragon3-start/60softBinary-5hardBinary"
-  
+
   # Input file paths
   input_files:
     "0sb": "N1m-Dragon3.inp.init"
     "20sb": "N1m-Dragon3.inp.init"
     "60sb": "N1m-Dragon3.inp.init"
-  
+
   # Plot directory
   plot_dir: "/p/home/jusers/wu13/juwels/scratch/plot"
-  
+
   # Cache directory suffix
   cache_dir_suffix: "/particle_df_cache"
 
@@ -28,9 +28,9 @@ figure_prefixes:
 # Processing options
 processing:
   skip_until:
-    "0sb": 700
-    "20sb": 60
-    "60sb": 0
+    "0sb": "last"
+    "20sb": "last"
+    "60sb": "last"
   skip_existing_plot: true
   plot_only_int_nbody_time: true
   close_figure_in_ipython: false
