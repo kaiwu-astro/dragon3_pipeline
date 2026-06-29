@@ -217,6 +217,9 @@ pip install pre-commit
 pre-commit install
 ```
 
+### 修改文档
+在完成后，按需修改 `README.md` 和 `AGENTS.md` ，来更新对本项目的各种记述。注意这两个文档**不是**日志，不应该事无巨细的写入，而只记述对用户或 agent 必要的信息。
+
 ### 并行处理注意事项
 
 **设置 OpenBLAS 线程数：**
