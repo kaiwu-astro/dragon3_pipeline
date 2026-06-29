@@ -636,6 +636,12 @@ class TestCurrentMassLagrangianProcessor:
         assert len(first) == 1
         assert len(second) == 1
         assert processor.hdf5_file_processor.read_file.call_count == 1
+        processor.hdf5_file_processor.read_file.assert_called_once_with(
+            str(hdf5_path),
+            "test_simu",
+            use_cache=True,
+            write_cache=False,
+        )
         assert (tmp_path / "cache" / "current_lagrangian" / "current_mass_lagr.feather").exists()
         assert (tmp_path / "cache" / "current_lagrangian" / "current_mass_lagr.meta.json").exists()
 

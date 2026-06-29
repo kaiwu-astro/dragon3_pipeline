@@ -55,7 +55,6 @@ class CurrentMassLagrangianProcessor:
             "enabled": True,
             "sample_every_nb_time": 1.0,
             "wait_age_hour": 24,
-            "use_hdf5_cache": True,
             "cache_filename": "current_mass_lagr.feather",
         }
         user_config = getattr(self.config, "current_lagrangian", {}) or {}
@@ -153,7 +152,8 @@ class CurrentMassLagrangianProcessor:
             df_dict = self.hdf5_file_processor.read_file(
                 hdf5_path,
                 simu_name,
-                use_cache=current_config["use_hdf5_cache"],
+                use_cache=True,
+                write_cache=False,
             )
             file_times = [float(t) for t in sorted(df_dict["scalars"]["TTOT"].unique())]
             old_file_meta = meta.get("processed_files", {}).get(hdf5_path)

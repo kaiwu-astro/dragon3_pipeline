@@ -2,7 +2,7 @@
 
 import pytest
 import pandas as pd
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from dragon3_pipelines.io import (
     get_scale_dict_from_hdf5_df,
@@ -250,6 +250,86 @@ class TestHDF5FileProcessor:
         mask = processor.get_compact_object_mask(df)
 
         assert mask.tolist() == [False, True, True]
+
+    def test_read_file_can_read_cache_without_writing_missing_cache(self):
+        """use_cache=True can check Feather cache without creating it."""
+        config_mock = Mock()
+        config_mock.input_file_path_of = {"test_simu": "/fake/input"}
+        config_mock.kw_to_stellar_type_verbose = {0: "0:MS"}
+        config_mock.kw_to_stellar_type = {0: "MS"}
+        config_mock.limits = {"L*": [1.0e-6, 1.0e6], "Teff*": [1000.0, 1.0e6]}
+        config_mock.ECLOSE_INPUT = 1.0
+        config_mock.universe_age_myr = 13800.0
+        processor = HDF5FileProcessor(config_mock)
+        df_dict = {
+            "scalars": pd.DataFrame(
+                {
+                    "TTOT": [1.0],
+                    "TTOT/TCR0": [1.0],
+                    "RBAR": [1.0],
+                    "ZMBAR": [1.0],
+                    "TSCALE": [1.0],
+                    "VSTAR": [1.0],
+                    "RDENS(1)": [0.0],
+                    "RDENS(2)": [0.0],
+                    "RDENS(3)": [0.0],
+                }
+            ).set_index("TTOT", drop=False),
+            "singles": pd.DataFrame(
+                {
+                    "TTOT": [1.0],
+                    "X1": [0.0],
+                    "X2": [0.0],
+                    "X3": [0.0],
+                    "V1": [0.0],
+                    "V2": [0.0],
+                    "V3": [0.0],
+                    "M": [1.0],
+                    "KW": [0],
+                    "L*": [1.0],
+                    "Teff*": [5000.0],
+                }
+            ),
+            "binaries": pd.DataFrame(
+                {
+                    "TTOT": pd.Series(dtype=float),
+                    "Bin cm X1": pd.Series(dtype=float),
+                    "Bin cm X2": pd.Series(dtype=float),
+                    "Bin cm X3": pd.Series(dtype=float),
+                    "Bin M1*": pd.Series(dtype=float),
+                    "Bin M2*": pd.Series(dtype=float),
+                    "Bin KW1": pd.Series(dtype=int),
+                    "Bin KW2": pd.Series(dtype=int),
+                    "Bin A[au]": pd.Series(dtype=float),
+                    "Bin ECC": pd.Series(dtype=float),
+                    "Bin RS1*": pd.Series(dtype=float),
+                    "Bin RS2*": pd.Series(dtype=float),
+                }
+            ),
+            "mergers": pd.DataFrame(),
+        }
+
+        with (
+            patch.object(processor, "_cache_is_complete", return_value=False),
+            patch.object(processor, "_write_df_dict_to_cache") as mock_write,
+            patch(
+                "dragon3_pipelines.io.text_parsers.dataframes_from_hdf5_file",
+                return_value=df_dict,
+            ),
+            patch(
+                "dragon3_pipelines.io.text_parsers.get_valueStr_of_namelist_key",
+                return_value="10",
+            ),
+        ):
+            result = processor.read_file(
+                "/fake/snap.40_1.h5part",
+                "test_simu",
+                use_cache=True,
+                write_cache=False,
+            )
+
+        assert result["scalars"]["Time[Myr]"].tolist() == [1.0]
+        mock_write.assert_not_called()
 
 
 class TestLagrFileProcessor:

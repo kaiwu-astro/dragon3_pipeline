@@ -71,6 +71,7 @@ class HDF5FileProcessor:
         simu_name: Optional[str] = None,
         N0: Optional[int] = None,
         use_cache: bool = False,
+        write_cache: bool = True,
     ) -> Dict[str, pd.DataFrame]:
         """
         Load and preprocess HDF5 data. Extract multiple DataFrames from a single HDF5 file containing snapshots at multiple times.
@@ -82,7 +83,8 @@ class HDF5FileProcessor:
             hdf5_path: Path to HDF5 file
             simu_name: Used to get initial condition file path and read N0
             N0: Initial particle count (required if simu_name is None)
-            use_cache: Read from Feather cache if exist + create cache after reading if not exist
+            use_cache: Read from Feather cache if it exists.
+            write_cache: Create Feather cache after reading HDF5 when use_cache is True.
 
         Returns:
             df_dict: Dictionary containing 'scalars', 'singles', 'binaries', 'mergers'
@@ -149,7 +151,7 @@ class HDF5FileProcessor:
         if use_cache and self._cache_is_complete(feather_path_of):
             try:
                 df_dict = self._read_df_dict_from_cache(feather_path_of)
-                logger.info(f"[cache] Loaded feather cache for {hdf5_path}")
+                logger.info(f"[hdf5-dataframe-cache] Loaded feather cache for {hdf5_path}")
                 return df_dict
             except Exception:
                 pass
@@ -307,12 +309,14 @@ class HDF5FileProcessor:
             merger_df_all["TTOT/TRH0"] = merger_df_all["TTOT/TCR0"] / (0.1 * N0 / np.log(0.4 * N0))
             merger_df_all["Time[Myr]"] = merger_df_all["TTOT"] * scale_dict["t"]
 
-        if use_cache:
+        if use_cache and write_cache:
             try:
                 self._write_df_dict_to_cache(df_dict, feather_path_of)
-                logger.info(f"[cache] Wrote feather cache for {hdf5_path}")
+                logger.info(f"[hdf5-dataframe-cache] Wrote feather cache for {hdf5_path}")
             except Exception as e:
-                logger.warning(f"[cache] Failed to write feather cache for {hdf5_path}. err={e!r}")
+                logger.warning(
+                    f"[hdf5-dataframe-cache] Failed to write feather cache for {hdf5_path}. err={e!r}"
+                )
 
         return df_dict
 

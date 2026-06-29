@@ -54,7 +54,6 @@ current_lagrangian:
   enabled: true
   sample_every_nb_time: 1.0
   wait_age_hour: 24
-  use_hdf5_cache: true
   cache_filename: "current_mass_lagr.feather"
 
 # Physical constants and thresholds
