@@ -39,8 +39,15 @@ python -m dragon3_pipelines --skip-until=last
 # Show purge command help
 python -m dragon3_pipelines help purge
 
-# Create movies from plots
-bash dragon3_jpg_to_movie.sh
+# Create movies from all preset plot patterns
+bash dragon3_pipelines/scripts/dragon3_jpg_to_movie.sh
+
+# Create movies for selected or custom plot patterns
+bash dragon3_pipelines/scripts/dragon3_jpg_to_movie.sh create _CMD.jpg _custom_suffix.jpg
+
+# Show movie command help and preset plot patterns
+bash dragon3_pipelines/scripts/dragon3_jpg_to_movie.sh --help
+bash dragon3_pipelines/scripts/dragon3_jpg_to_movie.sh create help
 ```
 
 ### Using as a Python Package

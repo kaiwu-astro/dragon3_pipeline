@@ -1,12 +1,44 @@
 #!/bin/bash
 
 set -e
+
+SCRIPT_NAME=$(basename "$0")
+
+show_top_help() {
+    cat <<EOF
+Usage:
+  bash $SCRIPT_NAME
+  bash $SCRIPT_NAME create <plot_pattern> [plot_pattern ...]
+  bash $SCRIPT_NAME help
+
+Commands:
+  create    Create movies for one or more plot patterns.
+            Run 'bash $SCRIPT_NAME create help' to list preset patterns.
+
+Without arguments, this script creates movies for all preset plot patterns.
+EOF
+}
+
+show_create_help() {
+    cat <<EOF
+Usage:
+  bash $SCRIPT_NAME create <plot_pattern> [plot_pattern ...]
+
+Create movies for one or more plot patterns. Patterns are matched directly
+against JPG filenames, so custom suffixes are allowed.
+
+Preset plot patterns:
+EOF
+    for plot_pattern in "${plot_patterns[@]}"; do
+        echo "  $plot_pattern"
+    done
+}
+
 # 记录总开始时间
 total_start_time=$(date +%s)
 
 PLOT_DIR="$HOME/scratch/plot/jpg" # jpg图片所在的目录
 MAX_PARALLEL_JOBS=15
-module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2
 
 make_ffmpeg_list() {
     # example:
@@ -70,6 +102,31 @@ plot_patterns=(
     "_x1_vs_x2_highlight_compact_objects.jpg"
     "_x1_vs_x2_highlight_compact_objects_wide_pc.jpg"
 )
+
+case "${1:-}" in
+    -h|--help|help)
+        show_top_help
+        exit 0
+        ;;
+    create)
+        shift
+        if [[ $# -eq 0 || "${1:-}" == "help" || "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+            show_create_help
+            exit 0
+        fi
+        plot_patterns=("$@")
+        ;;
+    "")
+        ;;
+    *)
+        echo "Unknown command or argument: $1" >&2
+        echo >&2
+        show_top_help >&2
+        exit 2
+        ;;
+esac
+
+module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2
 
 cd $PLOT_DIR || { echo "Failed to change directory to $PLOT_DIR"; exit 1; }
 
