@@ -8,7 +8,12 @@ import pandas as pd
 import pytest
 
 from dragon3_pipelines.__main__ import SimulationPlotter
-from dragon3_pipelines.analysis import CurrentMassLagrangianProcessor, ParticleTracker, tau_gw
+from dragon3_pipelines.analysis import (
+    CompactBinaryCounter,
+    CurrentMassLagrangianProcessor,
+    ParticleTracker,
+    tau_gw,
+)
 
 
 class TestParticleTracker:
@@ -698,6 +703,126 @@ class TestCurrentMassLagrangianProcessor:
         assert "Time[NB]" not in result.columns
         assert "sigma" in set(result["Metric"])
         assert result.loc[result["Metric"] == "sigma", "Value"].iloc[0] == pytest.approx(2.0)
+
+
+class TestCompactBinaryCounter:
+    """Tests for cross-snapshot compact binary counting."""
+
+    @pytest.fixture
+    def mock_config(self):
+        config = Mock()
+        config.compact_object_KW = np.array([10, 11, 12, 13, 14])
+        config.kw_to_stellar_type = {
+            0: "MS",
+            1: "MS",
+            10: "WD",
+            11: "WD",
+            12: "WD",
+            13: "NS",
+            14: "BH",
+        }
+        return config
+
+    @pytest.fixture
+    def counter(self, mock_config):
+        return CompactBinaryCounter(mock_config)
+
+    def _binary_df(self, rows):
+        return pd.DataFrame(
+            rows,
+            columns=["Bin Name1", "Bin Name2", "Bin KW1", "Bin KW2", "TTOT", "Time[Myr]"],
+        )
+
+    def test_classification_criteria(self, counter):
+        binary_df = self._binary_df(
+            [
+                (1, 2, 14, 14, 1.0, 10.0),
+                (3, 4, 14, 13, 1.0, 10.0),
+                (5, 6, 13, 1, 1.0, 10.0),
+                (7, 8, 13, 10, 1.0, 10.0),
+                (9, 10, 10, 1, 1.0, 10.0),
+                (11, 12, 14, 1, 1.0, 10.0),
+            ]
+        )
+        records = {category: {} for category in counter.CATEGORIES}
+
+        counter._accumulate_snapshot(records, binary_df)
+
+        assert set(records["gw_source"]) == {(1, 2), (3, 4)}
+        assert set(records["pulsar"]) == {(5, 6), (7, 8)}
+        assert set(records["xray_binary"]) == {(5, 6), (9, 10), (11, 12)}
+
+    def test_deduplicates_unordered_member_pairs_and_tracks_times(self, counter):
+        records = {category: {} for category in counter.CATEGORIES}
+        counter._accumulate_snapshot(records, self._binary_df([(100, 200, 13, 1, 1.0, 10.0)]))
+        counter._accumulate_snapshot(records, self._binary_df([(200, 100, 1, 13, 2.0, 20.0)]))
+
+        detail = counter._records_to_dataframe(records["pulsar"])
+
+        assert len(detail) == 1
+        row = detail.iloc[0]
+        assert row["binary_key"] == (100, 200)
+        assert row["first_ttot"] == 1.0
+        assert row["last_ttot"] == 2.0
+        assert row["n_snapshots_seen_in_category"] == 2
+
+    def test_same_binary_can_be_counted_in_multiple_categories_over_time(self, counter):
+        records = {category: {} for category in counter.CATEGORIES}
+        counter._accumulate_snapshot(records, self._binary_df([(1, 2, 13, 1, 1.0, 10.0)]))
+        counter._accumulate_snapshot(records, self._binary_df([(2, 1, 13, 10, 2.0, 20.0)]))
+
+        assert list(records["pulsar"]) == [(1, 2)]
+        assert list(records["xray_binary"]) == [(1, 2)]
+        assert records["pulsar"][(1, 2)]["n_snapshots_seen_in_category"] == 2
+        assert records["xray_binary"][(1, 2)]["n_snapshots_seen_in_category"] == 1
+
+    def test_summarize_simulation_uses_hdf5_scan_parameters(self, counter):
+        scalars = pd.DataFrame({"TTOT": [1.0, 2.0], "Time[Myr]": [10.0, 20.0]}).set_index(
+            "TTOT", drop=False
+        )
+        snapshots = {
+            1.0: self._binary_df([(1, 2, 14, 14, 1.0, 10.0), (3, 4, 13, 1, 1.0, 10.0)]),
+            2.0: self._binary_df([(2, 1, 14, 13, 2.0, 20.0), (5, 6, 10, 1, 2.0, 20.0)]),
+        }
+        df_dict = {"scalars": scalars, "singles": pd.DataFrame(), "binaries": pd.DataFrame()}
+
+        counter.hdf5_file_processor.get_all_hdf5_paths = Mock(return_value=["/tmp/a.h5part"])
+        counter.hdf5_file_processor.read_file = Mock(return_value=df_dict)
+        counter.hdf5_file_processor.get_snapshot_at_t = Mock(
+            side_effect=lambda _df_dict, ttot: (pd.DataFrame(), snapshots[ttot], True)
+        )
+
+        result = counter.summarize_simulation(
+            "test_simu",
+            sample_every_nb_time=0,
+            wait_age_hour=3,
+            exclude_bad_dirname=False,
+            use_hdf5_cache=False,
+        )
+
+        counter.hdf5_file_processor.get_all_hdf5_paths.assert_called_once_with(
+            "test_simu",
+            sample_every_nb_time=0,
+            exclude_bad_dirname=False,
+            wait_age_hour=3,
+        )
+        counter.hdf5_file_processor.read_file.assert_called_once_with(
+            "/tmp/a.h5part",
+            "test_simu",
+            use_cache=False,
+        )
+        assert counter.hdf5_file_processor.get_snapshot_at_t.call_count == 2
+        assert result["summary"] == {
+            "gw_source": 1,
+            "pulsar": 1,
+            "xray_binary": 2,
+            "scanned_files": 1,
+            "scanned_snapshots": 2,
+            "max_ttot": 2.0,
+            "max_time_myr": 20.0,
+        }
+        assert list(result["details"]) == ["gw_source", "pulsar", "xray_binary"]
+        assert result["details"]["gw_source"].iloc[0]["binary_key"] == (1, 2)
 
 
 class TestSimulationPlotterCurrentLagrangian:
