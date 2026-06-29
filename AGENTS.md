@@ -171,6 +171,9 @@ def process_data(
 
 ## 开发工作流
 
+### 加载环境
+必须执行 `source .venv/bin/activate` 再跑 python 或相关工具, 而不是直接跑 `.venv/bin/python`
+
 ### 测试命令
 运行所有测试：
 ```bash
