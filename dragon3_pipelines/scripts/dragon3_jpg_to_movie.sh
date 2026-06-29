@@ -70,6 +70,39 @@ get_quality_params() {
     esac
 }
 
+ffmpeg_cuda_available() {
+    local has_cuda=0
+    local has_hevc_nvenc=0
+
+    if ! ffmpeg -hide_banner -hwaccels >/dev/null 2>&1; then
+        return 2
+    fi
+    if ! ffmpeg -hide_banner -encoders >/dev/null 2>&1; then
+        return 2
+    fi
+
+    ffmpeg -hide_banner -hwaccels 2>/dev/null | grep -qw cuda && has_cuda=1
+    ffmpeg -hide_banner -encoders 2>/dev/null | grep -qw hevc_nvenc && has_hevc_nvenc=1
+
+    [[ $has_cuda -eq 1 && $has_hevc_nvenc -eq 1 ]]
+}
+
+run_ffmpeg_cpu() {
+    local list_file="$1"
+    local quality_params="$2"
+    local output_name="$3"
+
+    ffmpeg -y -r 30 -f concat -safe 0 -i "$list_file" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc -an -pix_fmt yuv420p -tag:v hvc1 -preset fast -movflags +faststart "$output_name"
+}
+
+run_ffmpeg_cuda() {
+    local list_file="$1"
+    local quality_params="$2"
+    local output_name="$3"
+
+    ffmpeg -y -hwaccel cuda -r 30 -f concat -safe 0 -i "$list_file" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc_nvenc -an -pix_fmt yuv420p -tag:v hvc1 -preset p1 -movflags +faststart "$output_name"
+}
+
 simu_name_patterns=(
     "_0sb"
     "20sb"
@@ -140,6 +173,7 @@ process_video() {
     local quality_params
     local list_file
     local output_name
+    local cuda_status
 
     start_time=$(date +%s) # 记录视频开始时间
     quality_params=$(get_quality_params "$plot_pattern")
@@ -151,15 +185,34 @@ process_video() {
     output_name="${simu_name_pattern}${plot_pattern}.mp4"
     rm -f "$output_name"
 
-    # ffmpeg -threads $n_threads -r 30 -f concat -safe 0 -i $list_file -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc -an -pix_fmt yuv420p -tag:v hvc1 -preset fast -movflags +faststart $output_name # pure cpu encoding (no gpu)
-    ffmpeg -y -hwaccel cuda -r 30 -f concat -safe 0 -i $list_file -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc_nvenc -an -pix_fmt yuv420p -tag:v hvc1 -preset p1 -movflags +faststart $output_name
+    if ffmpeg_cuda_available; then
+        echo "CUDA FFmpeg backend detected; using GPU encoding."
+        if ! run_ffmpeg_cuda "$list_file" "$quality_params" "$output_name"; then
+            echo "CUDA encoding failed; falling back to CPU encoding." >&2
+            rm -f "$output_name"
+            run_ffmpeg_cpu "$list_file" "$quality_params" "$output_name"
+        fi
+    else
+        cuda_status=$?
+        if [[ $cuda_status -eq 2 ]]; then
+            echo "Could not detect FFmpeg CUDA support; trying CUDA first, then falling back to CPU on failure."
+            if ! run_ffmpeg_cuda "$list_file" "$quality_params" "$output_name"; then
+                echo "CUDA encoding failed; falling back to CPU encoding." >&2
+                rm -f "$output_name"
+                run_ffmpeg_cpu "$list_file" "$quality_params" "$output_name"
+            fi
+        else
+            echo "CUDA FFmpeg backend not detected; using CPU encoding."
+            run_ffmpeg_cpu "$list_file" "$quality_params" "$output_name"
+        fi
+    fi
 
     end_time=$(date +%s) # 记录视频结束时间
     duration=$((end_time - start_time)) # 计算持续时间
     echo "Time taken for $output_name: $duration seconds" # 直接打印每个视频的持续时间
 }
 
-export -f process_video get_quality_params make_ffmpeg_list # 导出函数以供 xargs 使用
+export -f process_video get_quality_params make_ffmpeg_list ffmpeg_cuda_available run_ffmpeg_cpu run_ffmpeg_cuda # 导出函数以供 xargs 使用
 
 # 生成组合并通过管道传递给 xargs 以并行执行
 ( # 使用子 shell 对 echo 命令进行分组
