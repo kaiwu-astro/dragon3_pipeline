@@ -106,7 +106,7 @@ limits:
   'R*': [0.0004, 2000.0] # WD - Hayashi
   'position_pc_lim_moderate': [-7.0, 7.0]
   'position_pc_lim': [-15.0, 15.0]
-  'position_pc_lim_MAX': [-500.0, 500.0]
+  'position_pc_lim_MAX': [-2000.0, 2000.0]
   'Ebind/kT': [2.0e-7, 500.0]
   'tau_gw[Myr]': [9.0, 14000.0]
   'velocity_kmps_lim': [-200.0, 200.0]

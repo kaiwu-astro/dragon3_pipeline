@@ -6,16 +6,16 @@ total_start_time=$(date +%s)
 
 PLOT_DIR="$HOME/scratch/plot/jpg" # jpg图片所在的目录
 MAX_PARALLEL_JOBS=15
-module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2 
+module load Stages/2025 GCCcore/.13.3.0 CUDA FFmpeg/.7.0.2
 
 make_ffmpeg_list() {
     # example:
-    #     many files with name like 
-    #       dragon3_1m_5hb_ttot_33.375_mass.jpg 
-    #       dragon3_1m_5hb_ttot_6.0_mass.jpg 
+    #     many files with name like
+    #       dragon3_1m_5hb_ttot_33.375_mass.jpg
+    #       dragon3_1m_5hb_ttot_6.0_mass.jpg
     #     number is the 5th field, then do
     #     ls *.jpg | make_ffmpeg_list -k 5 > list.txt
-    # output: 
+    # output:
     #     stdout
     local key=2 # default value for -k
     while getopts k: flag
@@ -66,6 +66,7 @@ plot_patterns=(
     "_bin_vx_vs_x_compact_objects_only.jpg"
     "_a_vs_distance.jpg"
     "_a_vs_distance_compact_objects_only.jpg"
+    "_x1_vs_x2_wide_pc.jpg"
     "_x1_vs_x2_highlight_compact_objects.jpg"
     "_x1_vs_x2_highlight_compact_objects_wide_pc.jpg"
 )
@@ -92,16 +93,16 @@ process_video() {
     ls *"${simu_name_pattern}"*.0"${plot_pattern}" | make_ffmpeg_list -k 7 > "$list_file" #*.0 = 只考虑整的nbody时间。后续需要做成命令行参数
     output_name="${simu_name_pattern}${plot_pattern}.mp4"
     rm -f "$output_name"
-    
+
     # ffmpeg -threads $n_threads -r 30 -f concat -safe 0 -i $list_file -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc -an -pix_fmt yuv420p -tag:v hvc1 -preset fast -movflags +faststart $output_name # pure cpu encoding (no gpu)
     ffmpeg -y -hwaccel cuda -r 30 -f concat -safe 0 -i $list_file -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc_nvenc -an -pix_fmt yuv420p -tag:v hvc1 -preset p1 -movflags +faststart $output_name
-           
+
     end_time=$(date +%s) # 记录视频结束时间
     duration=$((end_time - start_time)) # 计算持续时间
     echo "Time taken for $output_name: $duration seconds" # 直接打印每个视频的持续时间
 }
 
-export -f process_video get_quality_params make_ffmpeg_list # 导出函数以供 xargs 使用 
+export -f process_video get_quality_params make_ffmpeg_list # 导出函数以供 xargs 使用
 
 # 生成组合并通过管道传递给 xargs 以并行执行
 ( # 使用子 shell 对 echo 命令进行分组

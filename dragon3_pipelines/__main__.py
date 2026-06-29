@@ -81,6 +81,7 @@ class SimulationPlotter:
 
             # 位置散点图
             self.hdf5_visualizer.single.create_position_plot_jpg(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_position_plot_wide_pc_jpg(single_df_at_t, simu_name)
             self.hdf5_visualizer.single.create_position_plot_hightlight_compact_objects_jpg(
                 single_df_at_t, simu_name
             )
