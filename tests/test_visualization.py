@@ -730,6 +730,76 @@ class TestPlotPurger:
 class TestPurgeCLI:
     """Test purge CLI behavior."""
 
+    def test_cli_top_level_help(self, capsys):
+        from dragon3_pipelines.__main__ import main
+
+        assert main(["--help"]) == 0
+        output = capsys.readouterr().out
+        assert "usage:" in output
+        assert "--skip-until" in output
+        assert "--debug" in output
+        assert "purge" in output
+        assert "dragon3-plot" in output
+
+    def test_cli_help_verb(self, capsys):
+        from dragon3_pipelines.__main__ import main
+
+        assert main(["help"]) == 0
+        output = capsys.readouterr().out
+        assert "usage:" in output
+        assert "subcommands" in output
+
+    def test_cli_help_purge(self, capsys):
+        from dragon3_pipelines.__main__ import main
+
+        assert main(["help", "purge"]) == 0
+        output = capsys.readouterr().out
+        assert "--list-targets" in output
+        assert "--dry-run" in output
+
+    def test_cli_purge_help_flag_and_verb(self, capsys):
+        from dragon3_pipelines.__main__ import main
+
+        assert main(["purge", "--help"]) == 0
+        output = capsys.readouterr().out
+        assert "--list-targets" in output
+        assert "--dry-run" in output
+
+        assert main(["purge", "help"]) == 0
+        output = capsys.readouterr().out
+        assert "--list-targets" in output
+        assert "--dry-run" in output
+
+    def test_cli_unknown_help_topic(self, capsys):
+        from dragon3_pipelines.__main__ import main
+
+        assert main(["help", "missing"]) == 2
+        output = capsys.readouterr().out
+        assert "Unknown help topic: missing" in output
+
+    def test_cli_short_skip_until_normalized(self, monkeypatch):
+        import dragon3_pipelines.__main__ as main_module
+
+        captured = {}
+
+        class FakeConfig:
+            def __init__(self, opts=None):
+                captured["opts"] = opts
+
+        class FakePlotter:
+            def __init__(self, config):
+                self.config = config
+
+            def plot_all_simulations(self):
+                captured["ran"] = True
+
+        monkeypatch.setattr(main_module, "ConfigManager", FakeConfig)
+        monkeypatch.setattr(main_module, "SimulationPlotter", FakePlotter)
+
+        assert main_module.main(["-k", "last"]) == 0
+        assert captured["opts"] == [("--skip-until", "last")]
+        assert captured["ran"] is True
+
     def test_cli_list_targets(self, capsys):
         from dragon3_pipelines.__main__ import main
 
