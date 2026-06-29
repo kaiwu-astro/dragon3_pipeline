@@ -56,6 +56,15 @@ current_lagrangian:
   wait_age_hour: 24
   cache_filename: "current_mass_lagr.feather"
 
+# Binary rows containing a requested stellar type, built from HDF5 snapshots
+binary_stellar_type_extraction:
+  sample_every_nb_time: 1.0
+  wait_age_hour: 24
+  use_hdf5_cache: true
+  parallel: false
+  processes: null
+  cache_filename_template: "binaries_with_{target}_until_{last_ttot:.6f}.feather"
+
 # Physical constants and thresholds
 physics:
   ECLOSE_INPUT: 1.0  # Binding energy per unit mass for hard binary (positive)

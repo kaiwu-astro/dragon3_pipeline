@@ -5,7 +5,7 @@ import os
 import time
 import warnings
 from glob import glob
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +47,56 @@ class HDF5FileProcessor:
             raise ValueError("[cache] scalars feather missing column 'TTOT'; cannot set index.")
         df_dict["scalars"] = df_dict["scalars"].set_index("TTOT", drop=False)
         return df_dict
+
+    def read_tables(
+        self,
+        hdf5_path: str,
+        simu_name: Optional[str],
+        tables: Sequence[str],
+        columns_by_table: Optional[Mapping[str, Sequence[str] | None]] = None,
+        use_cache: bool = True,
+    ) -> Dict[str, pd.DataFrame]:
+        """Read selected processed HDF5 tables, preferring existing feather caches.
+
+        If any requested feather cache is missing or does not contain requested columns, this
+        falls back to ``read_file(..., write_cache=False)`` and returns the requested tables.
+        """
+        columns_by_table = columns_by_table or {}
+        requested_tables = list(dict.fromkeys(tables))
+        feather_path_of = self._get_feather_path_of(hdf5_path)
+        if use_cache:
+            try:
+                df_dict = {}
+                for table in requested_tables:
+                    feather_path = feather_path_of[table]
+                    if not Path(feather_path).is_file():
+                        raise FileNotFoundError(feather_path)
+                    columns = columns_by_table.get(table)
+                    if columns is None:
+                        df = pd.read_feather(feather_path)
+                    else:
+                        df = pd.read_feather(feather_path, columns=list(columns))
+                    if table == "scalars":
+                        if "TTOT" not in df.columns:
+                            raise ValueError("[cache] scalars feather missing column 'TTOT'.")
+                        df = df.set_index("TTOT", drop=False)
+                    df_dict[table] = df
+                logger.info(
+                    "[hdf5-dataframe-cache] Loaded selected feather tables %s for %s",
+                    requested_tables,
+                    hdf5_path,
+                )
+                return df_dict
+            except (FileNotFoundError, KeyError, ValueError, TypeError, OSError):
+                pass
+
+        full_df_dict = self.read_file(
+            hdf5_path,
+            simu_name,
+            use_cache=use_cache,
+            write_cache=False,
+        )
+        return {table: full_df_dict.get(table, pd.DataFrame()) for table in requested_tables}
 
     def _write_df_dict_to_cache(
         self, df_dict: Dict[str, pd.DataFrame], feather_path_of: Dict[str, str]

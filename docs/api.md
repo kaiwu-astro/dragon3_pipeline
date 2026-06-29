@@ -36,6 +36,22 @@ Functions for parsing text-based simulation output files.
 
 Track individual particles through simulation snapshots.
 
+### `dragon3_pipelines.analysis.BinaryStellarTypeExtractor`
+
+Extract complete processed binary rows where either component matches a StellarType abbreviation or KW code.
+
+```python
+from dragon3_pipelines.analysis import BinaryStellarTypeExtractor
+from dragon3_pipelines.config import ConfigManager
+
+config = ConfigManager()
+extractor = BinaryStellarTypeExtractor(config)
+bh_binaries = extractor.load_binaries_with_stellar_type("20sb", stellar_type="BH")
+ns_binaries = extractor.load_binaries_with_stellar_type("20sb", kw="13")
+```
+
+Specify exactly one of `stellar_type` or `kw`. StellarType abbreviations are matched case-insensitively using `default_config.yaml` `stellar_types`.
+
 ### `dragon3_pipelines.analysis.tau_gw`
 
 Calculate gravitational wave merger timescales.

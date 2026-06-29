@@ -1,0 +1,329 @@
+"""Shared HDF5 scanning utilities for analysis data reduction tasks."""
+
+from __future__ import annotations
+
+import json
+import logging
+import multiprocessing
+import os
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Dict, Iterable, Mapping, Protocol, Sequence
+
+import numpy as np
+import pandas as pd
+
+from dragon3_pipelines.io import HDF5FileProcessor
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class HDF5ScanOptions:
+    """Options controlling HDF5 file enumeration and table loading."""
+
+    sample_every_nb_time: float | None = 1.0
+    wait_age_hour: int | float = 24
+    use_hdf5_cache: bool = True
+    parallel: bool = False
+    processes: int | None = None
+    exclude_bad_dirname: bool = True
+
+
+class HDF5ScanTask(Protocol):
+    """Protocol implemented by small analysis reductions over HDF5 files."""
+
+    name: str
+    required_tables: Sequence[str]
+    columns_by_table: Mapping[str, Sequence[str] | None]
+
+    def read_cache(self) -> pd.DataFrame: ...
+
+    def read_meta(self) -> Dict[str, Any]: ...
+
+    def is_file_fresh(
+        self, hdf5_path: str, meta: Dict[str, Any], cache_df: pd.DataFrame
+    ) -> bool: ...
+
+    def process_file(
+        self,
+        hdf5_path: str,
+        df_dict: Dict[str, pd.DataFrame],
+        meta: Dict[str, Any],
+        cache_df: pd.DataFrame,
+    ) -> Dict[str, Any]: ...
+
+    def merge_file_result(
+        self, cache_df: pd.DataFrame, hdf5_path: str, result: Dict[str, Any]
+    ) -> pd.DataFrame: ...
+
+    def write_cache_and_meta(
+        self,
+        cache_df: pd.DataFrame,
+        processed_files: Dict[str, Dict[str, Any]],
+        options: HDF5ScanOptions,
+    ) -> None: ...
+
+    def finalize_cache(self, cache_df: pd.DataFrame) -> pd.DataFrame: ...
+
+
+class HDF5ScanRunner:
+    """Run one or more HDF5 scan tasks while sharing file reads."""
+
+    def __init__(self, config_manager: Any, hdf5_file_processor: HDF5FileProcessor | None = None):
+        self.config = config_manager
+        self.hdf5_file_processor = hdf5_file_processor or HDF5FileProcessor(config_manager)
+
+    def run(
+        self,
+        simu_name: str,
+        tasks: Sequence[HDF5ScanTask],
+        options: HDF5ScanOptions,
+    ) -> Dict[str, pd.DataFrame]:
+        """Run tasks over stale HDF5 files and return each task's cache DataFrame."""
+        if not tasks:
+            return {}
+
+        states: Dict[str, Dict[str, Any]] = {}
+        stale_tasks_by_file: Dict[str, list[HDF5ScanTask]] = {}
+        hdf5_paths = self.hdf5_file_processor.get_all_hdf5_paths(
+            simu_name,
+            wait_age_hour=options.wait_age_hour,
+            sample_every_nb_time=options.sample_every_nb_time,
+            exclude_bad_dirname=options.exclude_bad_dirname,
+        )
+
+        for task in tasks:
+            cache_df = task.finalize_cache(task.read_cache())
+            meta = task.read_meta()
+            states[task.name] = {
+                "cache_df": cache_df,
+                "meta": meta,
+                "processed_files": dict(meta.get("processed_files", {})),
+            }
+            for hdf5_path in hdf5_paths:
+                if not task.is_file_fresh(hdf5_path, meta, cache_df):
+                    stale_tasks_by_file.setdefault(hdf5_path, []).append(task)
+
+        work_items = [
+            (hdf5_path, tuple(stale_tasks_by_file[hdf5_path]))
+            for hdf5_path in hdf5_paths
+            if hdf5_path in stale_tasks_by_file
+        ]
+
+        if options.parallel and len(work_items) > 1:
+            results_by_file = self._run_parallel(simu_name, work_items, states, options)
+        else:
+            results_by_file = [
+                self._run_file_tasks(simu_name, hdf5_path, file_tasks, states, options)
+                for hdf5_path, file_tasks in work_items
+            ]
+
+        for file_result in results_by_file:
+            hdf5_path = file_result["hdf5_path"]
+            for task_name, task_result in file_result["task_results"].items():
+                task = next(task for task in tasks if task.name == task_name)
+                state = states[task_name]
+                state["cache_df"] = task.merge_file_result(
+                    state["cache_df"], hdf5_path, task_result
+                )
+                state["cache_df"] = task.finalize_cache(state["cache_df"])
+                state["processed_files"][hdf5_path] = task_result["file_meta"]
+
+        output: Dict[str, pd.DataFrame] = {}
+        for task in tasks:
+            state = states[task.name]
+            cache_df = task.finalize_cache(state["cache_df"])
+            task.write_cache_and_meta(cache_df, state["processed_files"], options)
+            output[task.name] = cache_df
+        return output
+
+    def _run_parallel(
+        self,
+        simu_name: str,
+        work_items: Sequence[tuple[str, Sequence[HDF5ScanTask]]],
+        states: Mapping[str, Dict[str, Any]],
+        options: HDF5ScanOptions,
+    ) -> list[Dict[str, Any]]:
+        processes = options.processes or getattr(self.config, "processes_count", None)
+        ctx = multiprocessing.get_context("forkserver")
+        args = [
+            (self.config, simu_name, hdf5_path, file_tasks, states, options)
+            for hdf5_path, file_tasks in work_items
+        ]
+        with ctx.Pool(processes=processes) as pool:
+            return pool.map(_run_file_tasks_worker, args)
+
+    def _run_file_tasks(
+        self,
+        simu_name: str,
+        hdf5_path: str,
+        file_tasks: Sequence[HDF5ScanTask],
+        states: Mapping[str, Dict[str, Any]],
+        options: HDF5ScanOptions,
+    ) -> Dict[str, Any]:
+        required_tables = sorted({table for task in file_tasks for table in task.required_tables})
+        columns_by_table = _merge_columns_by_table(file_tasks)
+        df_dict = self.hdf5_file_processor.read_tables(
+            hdf5_path,
+            simu_name,
+            tables=required_tables,
+            columns_by_table=columns_by_table,
+            use_cache=options.use_hdf5_cache,
+        )
+        task_results = {}
+        for task in file_tasks:
+            state = states[task.name]
+            task_results[task.name] = task.process_file(
+                hdf5_path,
+                df_dict,
+                state["meta"],
+                state["cache_df"],
+            )
+        return {"hdf5_path": hdf5_path, "task_results": task_results}
+
+
+def _run_file_tasks_worker(
+    args: tuple[Any, str, str, Sequence[HDF5ScanTask], Any, HDF5ScanOptions],
+):
+    config, simu_name, hdf5_path, file_tasks, states, options = args
+    runner = HDF5ScanRunner(config)
+    return runner._run_file_tasks(simu_name, hdf5_path, file_tasks, states, options)
+
+
+def _merge_columns_by_table(
+    tasks: Iterable[HDF5ScanTask],
+) -> Dict[str, Sequence[str] | None]:
+    columns: Dict[str, set[str] | None] = {}
+    for task in tasks:
+        for table in task.required_tables:
+            task_columns = task.columns_by_table.get(table)
+            if task_columns is None:
+                columns[table] = None
+            elif columns.get(table) is not None:
+                columns.setdefault(table, set()).update(task_columns)
+    return {
+        table: None if table_columns is None else sorted(table_columns)
+        for table, table_columns in columns.items()
+    }
+
+
+class FeatherMetaCacheMixin:
+    """Small helper for tasks that persist one feather cache and one JSON sidecar."""
+
+    schema_version: int
+
+    @property
+    def cache_path(self) -> Path:
+        raise NotImplementedError
+
+    @property
+    def meta_path(self) -> Path:
+        return self.cache_path.with_name(self.cache_path.stem + ".meta.json")
+
+    def read_cache(self) -> pd.DataFrame:
+        if not self.cache_path.exists():
+            return pd.DataFrame()
+        return pd.read_feather(self.cache_path)
+
+    def read_meta(self) -> Dict[str, Any]:
+        if not self.meta_path.exists():
+            return {}
+        try:
+            return json.loads(self.meta_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Failed to read scan metadata %s: %r", self.meta_path, exc)
+            return {}
+
+    def write_cache_and_meta(
+        self,
+        cache_df: pd.DataFrame,
+        processed_files: Dict[str, Dict[str, Any]],
+        options: HDF5ScanOptions,
+    ) -> None:
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_cache_path = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
+        tmp_meta_path = self.meta_path.with_suffix(self.meta_path.suffix + ".tmp")
+        cache_df.to_feather(tmp_cache_path)
+        os.replace(tmp_cache_path, self.cache_path)
+        meta = self.build_meta(cache_df, processed_files, options)
+        tmp_meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True))
+        os.replace(tmp_meta_path, self.meta_path)
+
+    def build_meta(
+        self,
+        cache_df: pd.DataFrame,
+        processed_files: Dict[str, Dict[str, Any]],
+        options: HDF5ScanOptions,
+    ) -> Dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "scan_options": asdict(options),
+            "last_ttot": _last_ttot(cache_df),
+            "processed_files": processed_files,
+        }
+
+    def finalize_cache(self, cache_df: pd.DataFrame) -> pd.DataFrame:
+        return cache_df.reset_index(drop=True)
+
+
+def file_mtime(hdf5_path: str) -> float:
+    """Return file mtime as float, or NaN if the file is unavailable."""
+    try:
+        return float(os.path.getmtime(hdf5_path))
+    except OSError:
+        return np.nan
+
+
+def file_times_from_scalars(df_dict: Mapping[str, pd.DataFrame]) -> list[float]:
+    """Return sorted TTOT values from a scan df_dict."""
+    scalars = df_dict.get("scalars", pd.DataFrame())
+    if "TTOT" in scalars.columns:
+        values = scalars["TTOT"]
+    else:
+        values = pd.Series(scalars.index)
+    return sorted(float(t) for t in values.dropna().unique())
+
+
+def default_file_meta(hdf5_path: str, df_dict: Mapping[str, pd.DataFrame]) -> Dict[str, Any]:
+    """Metadata shared by scan tasks for one processed HDF5 file."""
+    return {"mtime": file_mtime(hdf5_path), "ttot": file_times_from_scalars(df_dict)}
+
+
+def file_is_fresh(
+    hdf5_path: str,
+    meta: Mapping[str, Any],
+    cached_times: set[float] | None = None,
+) -> bool:
+    """Return whether metadata says this HDF5 file is fresh in the cache."""
+    file_meta = meta.get("processed_files", {}).get(hdf5_path)
+    if not file_meta:
+        return False
+    current_mtime = file_mtime(hdf5_path)
+    if np.isnan(current_mtime):
+        return False
+    if not np.isclose(float(file_meta.get("mtime", np.nan)), current_mtime):
+        return False
+    if cached_times is None:
+        return True
+    return set(float(t) for t in file_meta.get("ttot", [])).issubset(cached_times)
+
+
+def replace_ttot_rows(
+    cache_df: pd.DataFrame,
+    new_df: pd.DataFrame,
+    ttot_column: str,
+) -> pd.DataFrame:
+    """Replace cached rows matching new TTOT values, then append new rows."""
+    if new_df.empty:
+        return cache_df
+    if not cache_df.empty and ttot_column in cache_df.columns and ttot_column in new_df.columns:
+        cache_df = cache_df[~cache_df[ttot_column].astype(float).isin(new_df[ttot_column])]
+    return pd.concat([cache_df, new_df], ignore_index=True, sort=False)
+
+
+def _last_ttot(cache_df: pd.DataFrame) -> float | None:
+    for column in ("TTOT", "Time[NB]"):
+        if column in cache_df.columns and not cache_df.empty:
+            return float(cache_df[column].max())
+    return None
