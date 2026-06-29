@@ -27,8 +27,17 @@ pip install -e ".[dev]"
 ### Using the Command Line
 
 ```bash
+# Show available commands and options
+python -m dragon3_pipelines --help
+
 # Run with default configuration
 python -m dragon3_pipelines
+
+# Resume from existing plots
+python -m dragon3_pipelines --skip-until=last
+
+# Show purge command help
+python -m dragon3_pipelines help purge
 
 # Create movies from plots
 bash dragon3_jpg_to_movie.sh
@@ -136,9 +145,26 @@ viz.create_mass_ratio_m1_plot_density(binary_df_at_t, simu_name="my_sim")
 
 ## Command Line Options
 
+- `-h`, `--help`, `help`: Show top-level command help
+- `help purge`: Show purge command help
 - `--skip-until=N`: Start processing from time N
 - `--skip-until=last`: Resume from last processed time
 - `--debug`: Enable debug logging
+
+The installed `dragon3-plot` script accepts the same arguments as `python -m dragon3_pipelines`.
+
+### Purge Generated Plots
+
+```bash
+# List supported purge targets
+python -m dragon3_pipelines purge --list-targets
+
+# Preview matching files before deleting
+python -m dragon3_pipelines purge single.create_position_plot_jpg --simu sim_a --dry-run
+
+# Delete matching files without an interactive confirmation
+python -m dragon3_pipelines purge single.create_position_plot_jpg --simu sim_a --yes
+```
 
 ## Contributing
 

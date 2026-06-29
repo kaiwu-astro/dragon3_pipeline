@@ -174,6 +174,11 @@ def process_data(
 ### 加载环境
 必须执行 `source .venv/bin/activate` 再跑 python 或相关工具, 而不是直接跑 `.venv/bin/python`
 
+### 命令行入口
+- `python -m dragon3_pipelines` 或 `dragon3-plot`：运行完整绘图流程
+- `python -m dragon3_pipelines --help` / `python -m dragon3_pipelines help`：查看顶层用法
+- `python -m dragon3_pipelines help purge`：查看 purge 子命令用法
+
 ### 测试命令
 运行所有测试：
 ```bash

@@ -23,8 +23,17 @@ pip install -e ".[dev]"
 ### Command Line Usage
 
 ```bash
+# Show available commands and options
+python -m dragon3_pipelines --help
+
 # Run analysis pipeline
 python -m dragon3_pipelines
+
+# Resume from existing plots
+python -m dragon3_pipelines --skip-until=last
+
+# Show purge command help
+python -m dragon3_pipelines help purge
 
 # Generate movies
 bash dragon3_jpg_to_movie.sh

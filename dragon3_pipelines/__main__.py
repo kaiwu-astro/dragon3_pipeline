@@ -267,8 +267,73 @@ def _build_purge_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _build_main_parser() -> argparse.ArgumentParser:
+    """Build the top-level CLI help parser."""
+    parser = argparse.ArgumentParser(
+        prog="python -m dragon3_pipelines",
+        description=(
+            "Run Dragon3 plot generation by default, or use a subcommand for maintenance tasks."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "-k",
+        "--skip-until",
+        metavar="VALUE",
+        help="Start processing from N-body time VALUE, or use 'last' to resume from existing plots",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+
+    subparsers = parser.add_subparsers(
+        title="subcommands",
+        metavar="command",
+        dest="command",
+    )
+    subparsers.add_parser("purge", help="Preview or delete generated plot files")
+    subparsers.add_parser("help", help="Show this help, or help for a command")
+
+    parser.epilog = (
+        "Examples:\n"
+        "  python -m dragon3_pipelines\n"
+        "  python -m dragon3_pipelines --skip-until=last\n"
+        "  python -m dragon3_pipelines help purge\n"
+        "  python -m dragon3_pipelines purge --list-targets\n"
+        "\n"
+        "The installed script 'dragon3-plot' accepts the same arguments."
+    )
+    return parser
+
+
+def _print_help_topic(topic: str | None) -> int:
+    """Print top-level help or subcommand help."""
+    if topic in (None, "dragon3_pipelines", "dragon3-plot"):
+        _build_main_parser().print_help()
+        return 0
+    if topic == "purge":
+        _build_purge_parser().print_help()
+        return 0
+
+    print(f"Unknown help topic: {topic}")
+    print("Use 'python -m dragon3_pipelines --help' to list available commands.")
+    return 2
+
+
+def _normalize_pipeline_opts(opts: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Normalize CLI option aliases before passing them to ConfigManager."""
+    normalized_opts = []
+    for opt, arg in opts:
+        if opt == "-k":
+            normalized_opts.append(("--skip-until", arg))
+        else:
+            normalized_opts.append((opt, arg))
+    return normalized_opts
+
+
 def _main_purge(argv: list[str]) -> int:
     """Run the purge CLI subcommand."""
+    if argv in (["-h"], ["--help"], ["help"]):
+        _build_purge_parser().print_help()
+        return 0
     parser = _build_purge_parser()
     args = parser.parse_args(argv)
 
@@ -321,6 +386,13 @@ def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point."""
     if argv is None:
         argv = sys.argv[1:]
+    if argv and argv[0] in ("-h", "--help"):
+        return _print_help_topic(None)
+    if argv and argv[0] == "help":
+        if len(argv) > 2:
+            print(f"Unexpected arguments: {' '.join(argv[2:])}")
+            return 2
+        return _print_help_topic(argv[1] if len(argv) == 2 else None)
     if argv and argv[0] == "purge":
         return _main_purge(argv[1:])
 
@@ -334,6 +406,7 @@ def main(argv: list[str] | None = None) -> int:
             logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s: %(message)s")
         else:
             logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
+        opts = _normalize_pipeline_opts(opts)
     except getopt.GetoptError as err:
         print(err)
         return 2
