@@ -12,7 +12,10 @@ from dragon3_pipelines.utils import save, read, get_output, can_convert_to_float
 
 def _check_colour_available():
     """Check if colour-science package is available"""
-    return importlib.util.find_spec("colour.colorimetry") is not None
+    try:
+        return importlib.util.find_spec("colour.colorimetry") is not None
+    except ModuleNotFoundError:
+        return False
 
 
 class TestSerialization:

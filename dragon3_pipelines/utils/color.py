@@ -34,7 +34,7 @@ class BlackbodyColorConverter:
         """
         if not COLOUR_AVAILABLE:
             raise ImportError(
-                "The 'colour' package is required for BlackbodyColorConverter. "
+                "The 'colour-science' package is required for BlackbodyColorConverter. "
                 "Install it with: pip install colour-science"
             )
 
