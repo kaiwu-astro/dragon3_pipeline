@@ -61,13 +61,19 @@ make_ffmpeg_list() {
     sort -t_ -k${key} -n | sed "s/^/file '/" | sed "s/$/'/"
 }
 
-# 根据文件模式确定比特率
-get_quality_params() {
+VIDEO_FILTER="setsar=1,pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0,format=yuv420p"
+
+# 根据文件模式确定 GPU 编码质量
+get_gpu_quality_params() {
     local pattern=$1
     case "$pattern" in
         "_x1_vs_x2.jpg") echo "-b:v 5M" ;;
         *) echo "-rc constqp -qp 43" ;; # 默认
     esac
+}
+
+get_cpu_quality_params() {
+    echo "-crf 18"
 }
 
 ffmpeg_cuda_available() {
@@ -87,12 +93,21 @@ ffmpeg_cuda_available() {
     [[ $has_cuda -eq 1 && $has_hevc_nvenc -eq 1 ]]
 }
 
+ffmpeg_libx265_available() {
+    ffmpeg -hide_banner -encoders 2>/dev/null | grep -qw libx265
+}
+
 run_ffmpeg_cpu() {
     local list_file="$1"
     local quality_params="$2"
     local output_name="$3"
 
-    ffmpeg -y -r 30 -f concat -safe 0 -i "$list_file" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc -an -pix_fmt yuv420p -tag:v hvc1 -preset fast -movflags +faststart "$output_name"
+    if ! ffmpeg_libx265_available; then
+        echo "CPU encoder libx265 is not available in this FFmpeg build." >&2
+        return 1
+    fi
+
+    ffmpeg -y -r 30 -f concat -safe 0 -i "$list_file" -vf "$VIDEO_FILTER" $quality_params -c:v libx265 -an -pix_fmt yuv420p -tag:v hvc1 -preset medium -movflags +faststart "$output_name"
 }
 
 run_ffmpeg_cuda() {
@@ -100,7 +115,7 @@ run_ffmpeg_cuda() {
     local quality_params="$2"
     local output_name="$3"
 
-    ffmpeg -y -hwaccel cuda -r 30 -f concat -safe 0 -i "$list_file" -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" $quality_params -c:v hevc_nvenc -an -pix_fmt yuv420p -tag:v hvc1 -preset p1 -movflags +faststart "$output_name"
+    ffmpeg -y -hwaccel cuda -r 30 -f concat -safe 0 -i "$list_file" -vf "$VIDEO_FILTER" $quality_params -c:v hevc_nvenc -an -pix_fmt yuv420p -tag:v hvc1 -preset p1 -movflags +faststart "$output_name"
 }
 
 simu_name_patterns=(
@@ -170,15 +185,20 @@ process_video() {
     local start_time
     local end_time
     local duration
-    local quality_params
+    local gpu_quality_params
+    local cpu_quality_params
     local list_file
     local output_name
     local cuda_status
 
     start_time=$(date +%s) # 记录视频开始时间
-    quality_params=$(get_quality_params "$plot_pattern")
+    gpu_quality_params=$(get_gpu_quality_params "$plot_pattern")
+    cpu_quality_params=$(get_cpu_quality_params "$plot_pattern")
     echo "======================================================"
-    echo "Making video for $simu_name_pattern $plot_pattern with $quality_params"
+    echo "Making video for $simu_name_pattern $plot_pattern"
+    echo "GPU quality params: $gpu_quality_params"
+    echo "CPU quality params: $cpu_quality_params"
+    echo "Video filter: $VIDEO_FILTER"
     echo "======================================================"
     list_file="${simu_name_pattern}${plot_pattern}.txt"
     ls *"${simu_name_pattern}"*.0"${plot_pattern}" | make_ffmpeg_list -k 7 > "$list_file" #*.0 = 只考虑整的nbody时间。后续需要做成命令行参数
@@ -187,23 +207,23 @@ process_video() {
 
     if ffmpeg_cuda_available; then
         echo "CUDA FFmpeg backend detected; using GPU encoding."
-        if ! run_ffmpeg_cuda "$list_file" "$quality_params" "$output_name"; then
+        if ! run_ffmpeg_cuda "$list_file" "$gpu_quality_params" "$output_name"; then
             echo "CUDA encoding failed; falling back to CPU encoding." >&2
             rm -f "$output_name"
-            run_ffmpeg_cpu "$list_file" "$quality_params" "$output_name"
+            run_ffmpeg_cpu "$list_file" "$cpu_quality_params" "$output_name"
         fi
     else
         cuda_status=$?
         if [[ $cuda_status -eq 2 ]]; then
             echo "Could not detect FFmpeg CUDA support; trying CUDA first, then falling back to CPU on failure."
-            if ! run_ffmpeg_cuda "$list_file" "$quality_params" "$output_name"; then
+            if ! run_ffmpeg_cuda "$list_file" "$gpu_quality_params" "$output_name"; then
                 echo "CUDA encoding failed; falling back to CPU encoding." >&2
                 rm -f "$output_name"
-                run_ffmpeg_cpu "$list_file" "$quality_params" "$output_name"
+                run_ffmpeg_cpu "$list_file" "$cpu_quality_params" "$output_name"
             fi
         else
             echo "CUDA FFmpeg backend not detected; using CPU encoding."
-            run_ffmpeg_cpu "$list_file" "$quality_params" "$output_name"
+            run_ffmpeg_cpu "$list_file" "$cpu_quality_params" "$output_name"
         fi
     fi
 
@@ -212,7 +232,8 @@ process_video() {
     echo "Time taken for $output_name: $duration seconds" # 直接打印每个视频的持续时间
 }
 
-export -f process_video get_quality_params make_ffmpeg_list ffmpeg_cuda_available run_ffmpeg_cpu run_ffmpeg_cuda # 导出函数以供 xargs 使用
+export VIDEO_FILTER
+export -f process_video get_gpu_quality_params get_cpu_quality_params make_ffmpeg_list ffmpeg_cuda_available ffmpeg_libx265_available run_ffmpeg_cpu run_ffmpeg_cuda # 导出函数以供 xargs 使用
 
 # 生成组合并通过管道传递给 xargs 以并行执行
 ( # 使用子 shell 对 echo 命令进行分组
