@@ -96,6 +96,9 @@ class ConfigManager:
         # Lagrangian radii
         self.selected_lagr_percent: List[str] = config["selected_lagr_percent"]
         self.current_lagrangian: Dict[str, Any] = config["current_lagrangian"]
+        self.binary_stellar_type_extraction: Dict[str, Any] = config[
+            "binary_stellar_type_extraction"
+        ]
 
         # Physics constants
         phys = config["physics"]
@@ -154,6 +157,11 @@ class ConfigManager:
 
         if "current_lagrangian" in user_config:
             self.current_lagrangian.update(user_config["current_lagrangian"])
+
+        if "binary_stellar_type_extraction" in user_config:
+            self.binary_stellar_type_extraction.update(
+                user_config["binary_stellar_type_extraction"]
+            )
 
     def _setup_derived_attributes(self) -> None:
         """Set up derived attributes that depend on configuration"""

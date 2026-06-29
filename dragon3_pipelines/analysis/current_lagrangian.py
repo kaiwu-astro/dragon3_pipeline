@@ -11,6 +11,14 @@ from typing import Any, Dict, Iterable, List
 import numpy as np
 import pandas as pd
 
+from dragon3_pipelines.analysis.hdf5_scan import (
+    FeatherMetaCacheMixin,
+    HDF5ScanOptions,
+    HDF5ScanRunner,
+    default_file_meta,
+    file_is_fresh,
+    replace_ttot_rows,
+)
 from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.io.text_parsers import make_l7header, transform_l7df_to_sns_friendly
 
@@ -129,93 +137,16 @@ class CurrentMassLagrangianProcessor:
     def update(self, simu_name: str) -> pd.DataFrame:
         """Update the cached current-mass Lagrangian table for one simulation."""
         current_config = self._current_lagrangian_config()
-        cache_df = self._read_cache(simu_name)
-        meta = self._read_meta(simu_name)
-        processed_files = dict(meta.get("processed_files", {}))
-        cached_times = (
-            set(cache_df["Time[NB]"].astype(float).tolist())
-            if "Time[NB]" in cache_df.columns
-            else set()
-        )
-
-        hdf5_paths = self.hdf5_file_processor.get_all_hdf5_paths(
-            simu_name,
-            wait_age_hour=current_config["wait_age_hour"],
+        options = HDF5ScanOptions(
             sample_every_nb_time=current_config["sample_every_nb_time"],
+            wait_age_hour=current_config["wait_age_hour"],
+            use_hdf5_cache=current_config.get("use_hdf5_cache", True),
+            parallel=current_config.get("parallel", False),
+            processes=current_config.get("processes"),
         )
-        processed_count = 0
-
-        for hdf5_path in hdf5_paths:
-            if self._is_file_fresh_in_meta(hdf5_path, meta, cached_times):
-                continue
-
-            df_dict = self.hdf5_file_processor.read_file(
-                hdf5_path,
-                simu_name,
-                use_cache=True,
-                write_cache=False,
-            )
-            file_times = [float(t) for t in sorted(df_dict["scalars"]["TTOT"].unique())]
-            old_file_meta = meta.get("processed_files", {}).get(hdf5_path)
-            file_mtime = os.path.getmtime(hdf5_path)
-            if old_file_meta and not np.isclose(
-                float(old_file_meta.get("mtime", np.nan)), file_mtime
-            ):
-                times_to_compute = file_times
-            else:
-                times_to_compute = [t for t in file_times if t not in cached_times]
-
-            file_rows = []
-            for ttot in times_to_compute:
-                single_df_at_t, _, is_valid = self.hdf5_file_processor.get_snapshot_at_t(
-                    df_dict, ttot
-                )
-                if not is_valid or single_df_at_t is None:
-                    logger.warning(
-                        "Skipping invalid current Lagrangian snapshot %s TTOT=%s",
-                        hdf5_path,
-                        ttot,
-                    )
-                    continue
-                scalar_row = df_dict["scalars"].loc[ttot]
-                file_rows.append(self.compute_snapshot(single_df_at_t, scalar_row))
-
-            processed_files[hdf5_path] = {
-                "mtime": file_mtime,
-                "ttot": file_times,
-            }
-
-            if file_rows:
-                new_df = pd.DataFrame(file_rows)
-                if not cache_df.empty and "Time[NB]" in cache_df.columns:
-                    cache_df = cache_df[~cache_df["Time[NB]"].isin(new_df["Time[NB]"])]
-                cache_df = pd.concat([cache_df, new_df], ignore_index=True, sort=False)
-
-            if not cache_df.empty:
-                cache_df = cache_df.sort_values("Time[NB]").drop_duplicates(
-                    subset=["Time[NB]"], keep="last"
-                )
-                cache_df = cache_df.reset_index(drop=True)
-
-            self._write_cache_and_meta(simu_name, cache_df, processed_files)
-            processed_count += 1
-            if processed_count % 25 == 0:
-                logger.info(
-                    "Updated current-mass Lagrangian cache for %s: %d/%d files checked, %d times cached",
-                    simu_name,
-                    processed_count,
-                    len(hdf5_paths),
-                    len(cache_df),
-                )
-
-        if not cache_df.empty:
-            cache_df = cache_df.sort_values("Time[NB]").drop_duplicates(
-                subset=["Time[NB]"], keep="last"
-            )
-            cache_df = cache_df.reset_index(drop=True)
-
-        self._write_cache_and_meta(simu_name, cache_df, processed_files)
-        return cache_df
+        task = CurrentMassLagrangianTask(self, simu_name)
+        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
+        return runner.run(simu_name, [task], options)[task.name]
 
     def load_sns_friendly_data(self, simu_name: str, update: bool = True) -> pd.DataFrame:
         """Return a seaborn-friendly long table compatible with ``LagrVisualizer``."""
@@ -460,3 +391,110 @@ class CurrentMassLagrangianProcessor:
         if not new_rows:
             return l7df_sns
         return pd.concat([l7df_sns] + new_rows, ignore_index=True)
+
+
+class CurrentMassLagrangianTask(FeatherMetaCacheMixin):
+    """Scan task backing CurrentMassLagrangianProcessor.update()."""
+
+    schema_version = CurrentMassLagrangianProcessor.SCHEMA_VERSION
+    required_tables = ("scalars", "singles")
+    columns_by_table = {"scalars": None, "singles": None}
+
+    def __init__(self, processor: CurrentMassLagrangianProcessor, simu_name: str) -> None:
+        self.processor = processor
+        self.config = processor.config
+        self.simu_name = simu_name
+        self.name = "current_mass_lagrangian"
+
+    @property
+    def cache_path(self) -> Path:
+        return self.processor._cache_path(self.simu_name)
+
+    def is_file_fresh(self, hdf5_path: str, meta: Dict[str, Any], cache_df: pd.DataFrame) -> bool:
+        cached_times = (
+            set(cache_df["Time[NB]"].astype(float).tolist())
+            if "Time[NB]" in cache_df.columns and not cache_df.empty
+            else set()
+        )
+        return file_is_fresh(hdf5_path, meta, cached_times)
+
+    def process_file(
+        self,
+        hdf5_path: str,
+        df_dict: Dict[str, pd.DataFrame],
+        meta: Dict[str, Any],
+        cache_df: pd.DataFrame,
+    ) -> Dict[str, Any]:
+        file_meta = default_file_meta(hdf5_path, df_dict)
+        cached_times = (
+            set(cache_df["Time[NB]"].astype(float).tolist())
+            if "Time[NB]" in cache_df.columns and not cache_df.empty
+            else set()
+        )
+        old_file_meta = meta.get("processed_files", {}).get(hdf5_path)
+        current_mtime = file_meta["mtime"]
+        if old_file_meta and not np.isclose(
+            float(old_file_meta.get("mtime", np.nan)), current_mtime
+        ):
+            times_to_compute = file_meta["ttot"]
+        else:
+            times_to_compute = [ttot for ttot in file_meta["ttot"] if ttot not in cached_times]
+
+        file_rows = []
+        for ttot in times_to_compute:
+            single_df_at_t, _, is_valid = self.processor.hdf5_file_processor.get_snapshot_at_t(
+                {
+                    "scalars": df_dict["scalars"],
+                    "singles": df_dict["singles"],
+                    "binaries": pd.DataFrame({"TTOT": []}),
+                },
+                ttot,
+            )
+            if not is_valid or single_df_at_t is None:
+                logger.warning(
+                    "Skipping invalid current Lagrangian snapshot %s TTOT=%s",
+                    hdf5_path,
+                    ttot,
+                )
+                continue
+            scalar_row = df_dict["scalars"].loc[ttot]
+            file_rows.append(self.processor.compute_snapshot(single_df_at_t, scalar_row))
+
+        return {"rows": pd.DataFrame(file_rows), "file_meta": file_meta}
+
+    def merge_file_result(
+        self, cache_df: pd.DataFrame, hdf5_path: str, result: Dict[str, Any]
+    ) -> pd.DataFrame:
+        new_df = result.get("rows", pd.DataFrame())
+        if "Time[NB]" in cache_df.columns:
+            ttot_values = result.get("file_meta", {}).get("ttot", [])
+            cache_df = cache_df[~cache_df["Time[NB]"].astype(float).isin(ttot_values)]
+        return replace_ttot_rows(cache_df, new_df, "Time[NB]")
+
+    def finalize_cache(self, cache_df: pd.DataFrame) -> pd.DataFrame:
+        if cache_df.empty:
+            return cache_df.reset_index(drop=True)
+        return (
+            cache_df.sort_values("Time[NB]")
+            .drop_duplicates(subset=["Time[NB]"], keep="last")
+            .reset_index(drop=True)
+        )
+
+    def build_meta(
+        self,
+        cache_df: pd.DataFrame,
+        processed_files: Dict[str, Dict[str, Any]],
+        options: HDF5ScanOptions,
+    ) -> Dict[str, Any]:
+        current_config = self.processor._current_lagrangian_config()
+        return {
+            "schema_version": self.schema_version,
+            "sample_every_nb_time": current_config["sample_every_nb_time"],
+            "wait_age_hour": current_config["wait_age_hour"],
+            "use_hdf5_cache": current_config.get("use_hdf5_cache", True),
+            "parallel": current_config.get("parallel", False),
+            "processes": current_config.get("processes"),
+            "statistics": "current-mass weighted, singles table only",
+            "percentages": self.processor.percentages,
+            "processed_files": processed_files,
+        }

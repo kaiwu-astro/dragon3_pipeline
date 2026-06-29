@@ -18,6 +18,11 @@ def __getattr__(name: str) -> Any:
         exported = {"main": main, "SimulationPlotter": SimulationPlotter}
         globals().update(exported)
         return exported[name]
+    if name == "BinaryStellarTypeExtractor":
+        from dragon3_pipelines.analysis import BinaryStellarTypeExtractor
+
+        globals()[name] = BinaryStellarTypeExtractor
+        return BinaryStellarTypeExtractor
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -26,4 +31,5 @@ __all__ = [
     "__version__",
     "main",
     "SimulationPlotter",
+    "BinaryStellarTypeExtractor",
 ]

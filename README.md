@@ -137,6 +137,20 @@ tracker = ParticleTracker(config)
 particle_history = tracker.update_one_particle_history_df(simu_name="my_sim", particle_name=12345)
 ```
 
+### Extract Binaries by Stellar Type
+
+```python
+from dragon3_pipelines.analysis import BinaryStellarTypeExtractor
+from dragon3_pipelines.config import ConfigManager
+
+config = ConfigManager()
+extractor = BinaryStellarTypeExtractor(config)
+bh_binaries = extractor.load_binaries_with_stellar_type("my_sim", stellar_type="BH")
+ns_binaries = extractor.load_binaries_with_stellar_type("my_sim", kw=13)
+```
+
+The returned table contains the complete processed binary rows for every snapshot where either binary component matches the requested stellar type or KW code.
+
 ### Create Visualizations
 
 ```python

@@ -124,14 +124,28 @@ class CompactBinaryCounter:
     def _read_counting_tables(
         self, hdf5_path: str, simu_name: str, use_hdf5_cache: bool
     ) -> Dict[str, pd.DataFrame]:
-        if use_hdf5_cache:
-            cached = self._read_counting_tables_from_cache(hdf5_path)
-            if cached is not None:
-                return cached
-        return self.hdf5_file_processor.read_file(
+        if not use_hdf5_cache:
+            return self.hdf5_file_processor.read_file(
+                hdf5_path,
+                simu_name,
+                use_cache=False,
+            )
+
+        binary_columns = [
+            "Bin Name1",
+            "Bin Name2",
+            "Bin KW1",
+            "Bin KW2",
+            "TTOT",
+            "Time[Myr]",
+            "Stellar Type",
+        ]
+        return self.hdf5_file_processor.read_tables(
             hdf5_path,
             simu_name,
-            use_cache=use_hdf5_cache,
+            tables=["scalars", "binaries"],
+            columns_by_table={"scalars": ["TTOT", "Time[Myr]"], "binaries": binary_columns},
+            use_cache=True,
         )
 
     def _read_counting_tables_from_cache(self, hdf5_path: str) -> Dict[str, pd.DataFrame] | None:

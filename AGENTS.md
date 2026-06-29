@@ -372,6 +372,10 @@ class DataProcessor:
         logger.info("All files processed")
 ```
 
+### Analysis/Data Reduction 扫描约定
+
+未来凡是“遍历 HDF5 文件抽取小型信息”的 analysis/data-reduction 功能，优先实现为 `HDF5ScanTask` 并通过 `HDF5ScanRunner` 执行。不要复制新的 HDF5 遍历循环，也不要把这类缓存写入逻辑塞进绘图主循环；`SimulationPlotter.plot_hdf5_file` 应保持绘图调度职责。
+
 ### ❌ 其他禁止事项
 
 - **禁止在代码中硬编码绝对路径**（应使用配置或相对路径）
