@@ -144,7 +144,7 @@ class CurrentMassLagrangianProcessor:
             wait_age_hour=current_config["wait_age_hour"],
             sample_every_nb_time=current_config["sample_every_nb_time"],
         )
-        new_rows = []
+        processed_count = 0
 
         for hdf5_path in hdf5_paths:
             if self._is_file_fresh_in_meta(hdf5_path, meta, cached_times):
@@ -165,6 +165,7 @@ class CurrentMassLagrangianProcessor:
             else:
                 times_to_compute = [t for t in file_times if t not in cached_times]
 
+            file_rows = []
             for ttot in times_to_compute:
                 single_df_at_t, _, is_valid = self.hdf5_file_processor.get_snapshot_at_t(
                     df_dict, ttot
@@ -177,18 +178,35 @@ class CurrentMassLagrangianProcessor:
                     )
                     continue
                 scalar_row = df_dict["scalars"].loc[ttot]
-                new_rows.append(self.compute_snapshot(single_df_at_t, scalar_row))
+                file_rows.append(self.compute_snapshot(single_df_at_t, scalar_row))
 
             processed_files[hdf5_path] = {
                 "mtime": file_mtime,
                 "ttot": file_times,
             }
 
-        if new_rows:
-            new_df = pd.DataFrame(new_rows)
-            if not cache_df.empty and "Time[NB]" in cache_df.columns:
-                cache_df = cache_df[~cache_df["Time[NB]"].isin(new_df["Time[NB]"])]
-            cache_df = pd.concat([cache_df, new_df], ignore_index=True, sort=False)
+            if file_rows:
+                new_df = pd.DataFrame(file_rows)
+                if not cache_df.empty and "Time[NB]" in cache_df.columns:
+                    cache_df = cache_df[~cache_df["Time[NB]"].isin(new_df["Time[NB]"])]
+                cache_df = pd.concat([cache_df, new_df], ignore_index=True, sort=False)
+
+            if not cache_df.empty:
+                cache_df = cache_df.sort_values("Time[NB]").drop_duplicates(
+                    subset=["Time[NB]"], keep="last"
+                )
+                cache_df = cache_df.reset_index(drop=True)
+
+            self._write_cache_and_meta(simu_name, cache_df, processed_files)
+            processed_count += 1
+            if processed_count % 25 == 0:
+                logger.info(
+                    "Updated current-mass Lagrangian cache for %s: %d/%d files checked, %d times cached",
+                    simu_name,
+                    processed_count,
+                    len(hdf5_paths),
+                    len(cache_df),
+                )
 
         if not cache_df.empty:
             cache_df = cache_df.sort_values("Time[NB]").drop_duplicates(
@@ -238,20 +256,26 @@ class CurrentMassLagrangianProcessor:
         position = self._position_array(snapshot_df, radius)
         order = np.argsort(radius, kind="mergesort")
         sorted_mass = mass[order]
+        sorted_radius = radius[order]
         cumulative_mass = np.cumsum(sorted_mass)
+        prefix_stats = self._build_prefix_stats(
+            sorted_mass,
+            sorted_radius,
+            position[order],
+            velocity[order],
+        )
 
         for suffix in self.percentages:
             if suffix == "<RC":
                 rc_pc = float(scalar_row["RC"]) * float(scalar_row["RBAR"])
-                mask = radius <= rc_pc
+                count = int(np.searchsorted(sorted_radius, rc_pc, side="right"))
+                stats = self._stats_at_prefix(prefix_stats, count - 1)
             else:
                 target_mass = total_mass * float(suffix)
                 idx = int(np.searchsorted(cumulative_mass, target_mass, side="left"))
                 idx = min(idx, len(order) - 1)
-                lagr_radius = radius[order[idx]]
-                mask = radius <= lagr_radius
+                stats = self._stats_at_prefix(prefix_stats, idx)
 
-            stats = self._compute_region_stats(mass, radius, position, velocity, mask)
             for metric, value in stats.items():
                 row[f"{metric}{suffix}"] = value
 
@@ -267,6 +291,97 @@ class CurrentMassLagrangianProcessor:
         position[:, 0] = radius
         return position
 
+    def _empty_region_stats(self) -> Dict[str, float]:
+        return {
+            "rlagr": np.nan,
+            "avmass": np.nan,
+            "nshell": 0,
+            "vx": np.nan,
+            "vy": np.nan,
+            "vz": np.nan,
+            "v": np.nan,
+            "vr": np.nan,
+            "vt": np.nan,
+            "sigma2": np.nan,
+            "sigma_r2": np.nan,
+            "sigma_t2": np.nan,
+            "vrot": np.nan,
+        }
+
+    def _build_prefix_stats(
+        self,
+        sorted_mass: np.ndarray,
+        sorted_radius: np.ndarray,
+        sorted_position: np.ndarray,
+        sorted_velocity: np.ndarray,
+    ) -> Dict[str, np.ndarray]:
+        speed = np.linalg.norm(sorted_velocity, axis=1)
+        radial_unit = np.divide(
+            sorted_position,
+            sorted_radius[:, None],
+            out=np.zeros_like(sorted_position, dtype=float),
+            where=sorted_radius[:, None] > 0,
+        )
+        radial_velocity = np.sum(sorted_velocity * radial_unit, axis=1)
+        tangential_velocity = np.sqrt(np.maximum(speed**2 - radial_velocity**2, 0.0))
+        velocity2 = np.sum(sorted_velocity**2, axis=1)
+        angular_momentum_speed = np.linalg.norm(np.cross(sorted_position, sorted_velocity), axis=1)
+        vrot = np.divide(
+            angular_momentum_speed,
+            sorted_radius,
+            out=np.zeros_like(angular_momentum_speed, dtype=float),
+            where=sorted_radius > 0,
+        )
+
+        weighted_velocity = sorted_velocity * sorted_mass[:, None]
+        return {
+            "radius": sorted_radius,
+            "mass": np.cumsum(sorted_mass),
+            "count": np.arange(1, len(sorted_mass) + 1, dtype=float),
+            "velocity": np.cumsum(weighted_velocity, axis=0),
+            "speed": np.cumsum(sorted_mass * speed),
+            "radial_velocity": np.cumsum(sorted_mass * radial_velocity),
+            "tangential_velocity": np.cumsum(sorted_mass * tangential_velocity),
+            "velocity2": np.cumsum(sorted_mass * velocity2),
+            "radial_velocity2": np.cumsum(sorted_mass * radial_velocity**2),
+            "vrot": np.cumsum(sorted_mass * vrot),
+        }
+
+    def _stats_at_prefix(self, prefix_stats: Dict[str, np.ndarray], idx: int) -> Dict[str, float]:
+        if idx < 0:
+            return self._empty_region_stats()
+
+        mass_sum = float(prefix_stats["mass"][idx])
+        count = int(prefix_stats["count"][idx])
+        mean_velocity = prefix_stats["velocity"][idx] / mass_sum
+        mean_speed = float(prefix_stats["speed"][idx] / mass_sum)
+        mean_radial_velocity = float(prefix_stats["radial_velocity"][idx] / mass_sum)
+        mean_tangential_velocity = float(prefix_stats["tangential_velocity"][idx] / mass_sum)
+
+        sigma2 = float(
+            prefix_stats["velocity2"][idx] / mass_sum - np.dot(mean_velocity, mean_velocity)
+        )
+        sigma2 = max(sigma2, 0.0)
+        sigma_r2 = float(prefix_stats["radial_velocity2"][idx] / mass_sum - mean_radial_velocity**2)
+        sigma_r2 = max(sigma_r2, 0.0)
+        sigma_t2 = max(sigma2 - sigma_r2, 0.0)
+
+        return {
+            "rlagr": float(prefix_stats["radius"][idx]),
+            "avmass": float(mass_sum / count),
+            "nshell": count,
+            "vx": float(mean_velocity[0]),
+            "vy": float(mean_velocity[1]),
+            "vz": float(mean_velocity[2]),
+            "v": mean_speed,
+            "vr": mean_radial_velocity,
+            "vt": mean_tangential_velocity,
+            "sigma2": sigma2,
+            "sigma_r2": sigma_r2,
+            "sigma_t2": sigma_t2,
+            "vrot": float(prefix_stats["vrot"][idx] / mass_sum),
+        }
+
     def _compute_region_stats(
         self,
         mass: np.ndarray,
@@ -278,21 +393,7 @@ class CurrentMassLagrangianProcessor:
         mask = np.asarray(mask, dtype=bool)
         n_stars = int(mask.sum())
         if n_stars == 0:
-            return {
-                "rlagr": np.nan,
-                "avmass": np.nan,
-                "nshell": 0,
-                "vx": np.nan,
-                "vy": np.nan,
-                "vz": np.nan,
-                "v": np.nan,
-                "vr": np.nan,
-                "vt": np.nan,
-                "sigma2": np.nan,
-                "sigma_r2": np.nan,
-                "sigma_t2": np.nan,
-                "vrot": np.nan,
-            }
+            return self._empty_region_stats()
 
         region_mass = mass[mask]
         region_position = position[mask]
