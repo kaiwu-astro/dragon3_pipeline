@@ -2,6 +2,7 @@
 Tests for dragon3_pipelines.visualization module
 """
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -19,6 +20,7 @@ from dragon3_pipelines.visualization import (
     CollCoalVisualizer,
     set_mpl_fonts,
     add_grid,
+    PlotPurger,
 )
 
 
@@ -590,3 +592,184 @@ class TestParticleHistoryVisualizer:
 
         # Should not raise an error and return early
         vis.plot(pd.DataFrame())
+
+
+def _touch_plot(plot_dir: Path, prefix: str, filename_var_part: str, ttot: str = "1.0") -> Path:
+    path = plot_dir / "jpg" / f"{prefix}output_ttot_{ttot}_{filename_var_part}.jpg"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("fake jpg")
+    return path
+
+
+class TestPlotPurger:
+    """Test HDF5 plot purge registry and deletion behavior."""
+
+    def test_each_hdf5_method_target_matches_only_own_file(self, mock_config, tmp_path):
+        from dragon3_pipelines.visualization.purge import PLOT_TARGETS
+
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        purger = PlotPurger(mock_config)
+
+        for entry in PLOT_TARGETS:
+            for path in (tmp_path / "jpg").glob("*.jpg"):
+                path.unlink()
+            expected = _touch_plot(tmp_path, "a_", entry.filename_var_part)
+            _touch_plot(tmp_path, "a_", f"not_{entry.filename_var_part}")
+            _touch_plot(tmp_path, "wrong_", entry.filename_var_part)
+            (tmp_path / f"a_output_ttot_1.0_{entry.filename_var_part}.jpg").write_text("outside")
+
+            result = purger.preview(entry.qualified_name, simu_name="sim_a")
+
+            assert result.matched_paths == [expected.resolve()]
+
+    def test_composite_targets_expand_to_expected_method_sets(self, mock_config, tmp_path):
+        from dragon3_pipelines.visualization.purge import (
+            BINARY_TARGETS,
+            PLOT_TARGETS,
+            SINGLE_TARGETS,
+        )
+
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        purger = PlotPurger(mock_config)
+
+        for entry in PLOT_TARGETS:
+            _touch_plot(tmp_path, "a_", entry.filename_var_part)
+
+        single = purger.preview("single", simu_name="sim_a")
+        binary = purger.preview("binary", simu_name="sim_a")
+        hdf5 = purger.preview("hdf5", simu_name="sim_a")
+
+        assert len(single.matched_paths) == len(SINGLE_TARGETS)
+        assert len(binary.matched_paths) == len(BINARY_TARGETS)
+        assert len(hdf5.matched_paths) == len(PLOT_TARGETS)
+
+    def test_simu_name_limits_prefix_and_all_sims_uses_all_prefixes(self, mock_config, tmp_path):
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_", "sim_b": "b_"}
+        purger = PlotPurger(mock_config)
+        _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        _touch_plot(tmp_path, "b_", "x1_vs_x2")
+
+        one_sim = purger.preview("single.create_position_plot_jpg", simu_name="sim_a")
+        all_sims = purger.preview("single.create_position_plot_jpg")
+
+        assert len(one_sim.matched_paths) == 1
+        assert one_sim.matched_paths[0].name.startswith("a_")
+        assert len(all_sims.matched_paths) == 2
+
+    def test_filename_suffix_matching(self, mock_config, tmp_path):
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        purger = PlotPurger(mock_config)
+        default = _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        custom = _touch_plot(tmp_path, "a_", "x1_vs_x2_custom")
+
+        default_result = purger.preview("single.create_position_plot_jpg", simu_name="sim_a")
+        custom_result = purger.preview(
+            "single.create_position_plot_jpg",
+            simu_name="sim_a",
+            filename_suffix="custom",
+        )
+
+        assert default_result.matched_paths == [default.resolve()]
+        assert custom_result.matched_paths == [custom.resolve()]
+
+    def test_long_preview_shows_head_and_tail(self, tmp_path):
+        paths = [tmp_path / f"file_{i:02d}.jpg" for i in range(25)]
+
+        preview = PlotPurger.format_preview(paths)
+
+        assert "Matched 25 files" in preview
+        assert "file_00.jpg" in preview
+        assert "file_09.jpg" in preview
+        assert "omitted 5 files" in preview
+        assert "file_15.jpg" in preview
+        assert "file_24.jpg" in preview
+        assert "file_10.jpg" not in preview
+
+    def test_confirmation_cancel_does_not_delete(self, mock_config, tmp_path, monkeypatch):
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        path = _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        purger = PlotPurger(mock_config)
+        monkeypatch.setattr("builtins.input", lambda prompt: "no")
+
+        result = purger.purge("single.create_position_plot_jpg", simu_name="sim_a")
+
+        assert result.cancelled is True
+        assert result.deleted_paths == []
+        assert path.exists()
+
+    def test_confirmation_phrase_deletes(self, mock_config, tmp_path, monkeypatch):
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        path = _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        purger = PlotPurger(mock_config)
+        monkeypatch.setattr("builtins.input", lambda prompt: "delete 1 files")
+
+        result = purger.purge("single.create_position_plot_jpg", simu_name="sim_a")
+
+        assert result.cancelled is False
+        assert result.deleted_paths == [path.resolve()]
+        assert not path.exists()
+
+    def test_visualizer_purge_adds_group_prefix(self, mock_config, tmp_path):
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        path = _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        vis = SingleStarVisualizer(mock_config)
+
+        result = vis.purge("create_position_plot_jpg", simu_name="sim_a", yes=True)
+
+        assert result.deleted_paths == [path.resolve()]
+        assert not path.exists()
+
+
+class TestPurgeCLI:
+    """Test purge CLI behavior."""
+
+    def test_cli_list_targets(self, capsys):
+        from dragon3_pipelines.__main__ import main
+
+        assert main(["purge", "--list-targets"]) == 0
+        output = capsys.readouterr().out
+        assert "single.create_position_plot_jpg" in output
+        assert "hdf5" in output
+
+    def test_cli_dry_run(self, mock_config, tmp_path, monkeypatch, capsys):
+        import dragon3_pipelines.__main__ as main_module
+
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        monkeypatch.setattr(main_module, "ConfigManager", lambda opts=None: mock_config)
+
+        assert (
+            main_module.main(
+                ["purge", "single.create_position_plot_jpg", "--simu", "sim_a", "--dry-run"]
+            )
+            == 0
+        )
+        output = capsys.readouterr().out
+        assert "Matched 1 files" in output
+        assert "x1_vs_x2.jpg" in output
+
+    def test_cli_yes_deletes(self, mock_config, tmp_path, monkeypatch, capsys):
+        import dragon3_pipelines.__main__ as main_module
+
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        path = _touch_plot(tmp_path, "a_", "x1_vs_x2")
+        monkeypatch.setattr(main_module, "ConfigManager", lambda opts=None: mock_config)
+
+        assert (
+            main_module.main(
+                ["purge", "single.create_position_plot_jpg", "--simu", "sim_a", "--yes"]
+            )
+            == 0
+        )
+        output = capsys.readouterr().out
+        assert "Deleted 1 files" in output
+        assert not path.exists()

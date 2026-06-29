@@ -12,12 +12,31 @@ import seaborn as sns
 
 from dragon3_pipelines.utils import log_time
 from dragon3_pipelines.visualization.base import BaseHDF5Visualizer, add_grid
+from dragon3_pipelines.visualization.purge import PlotPurger, PurgeResult
 
 logger = logging.getLogger(__name__)
 
 
 class SingleStarVisualizer(BaseHDF5Visualizer):
     """Visualizer for single star data"""
+
+    def purge(
+        self,
+        target: str,
+        simu_name: str | None = None,
+        plot_dir: str | os.PathLike[str] | None = None,
+        filename_suffix: str | None = None,
+        yes: bool = False,
+    ) -> PurgeResult:
+        """Purge single-star HDF5 JPG outputs for a target."""
+        qualified_target = target if target.startswith("single.") else f"single.{target}"
+        return PlotPurger(self.config).purge(
+            qualified_target,
+            simu_name=simu_name,
+            plot_dir=plot_dir,
+            filename_suffix=filename_suffix,
+            yes=yes,
+        )
 
     @log_time(logger)
     def create_mass_distance_plot_density(

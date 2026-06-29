@@ -12,12 +12,31 @@ import seaborn as sns
 
 from dragon3_pipelines.utils import log_time
 from dragon3_pipelines.visualization.base import BaseHDF5Visualizer, add_grid
+from dragon3_pipelines.visualization.purge import PlotPurger, PurgeResult
 
 logger = logging.getLogger(__name__)
 
 
 class BinaryStarVisualizer(BaseHDF5Visualizer):
     """Visualizer for binary star data"""
+
+    def purge(
+        self,
+        target: str,
+        simu_name: str | None = None,
+        plot_dir: str | os.PathLike[str] | None = None,
+        filename_suffix: str | None = None,
+        yes: bool = False,
+    ) -> PurgeResult:
+        """Purge binary-star HDF5 JPG outputs for a target."""
+        qualified_target = target if target.startswith("binary.") else f"binary.{target}"
+        return PlotPurger(self.config).purge(
+            qualified_target,
+            simu_name=simu_name,
+            plot_dir=plot_dir,
+            filename_suffix=filename_suffix,
+            yes=yes,
+        )
 
     def _create_base_jpg_plot_compact_object_only(
         self,

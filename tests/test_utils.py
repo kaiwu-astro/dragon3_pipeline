@@ -2,20 +2,17 @@
 Tests for dragon3_pipelines.utils module
 """
 
-import pytest
+import importlib.util
 import logging
+
+import pytest
 
 from dragon3_pipelines.utils import save, read, get_output, can_convert_to_float, log_time
 
 
 def _check_colour_available():
     """Check if colour-science package is available"""
-    try:
-        from colour.colorimetry import SpectralDistribution
-
-        return True
-    except (ImportError, ModuleNotFoundError):
-        return False
+    return importlib.util.find_spec("colour.colorimetry") is not None
 
 
 class TestSerialization:

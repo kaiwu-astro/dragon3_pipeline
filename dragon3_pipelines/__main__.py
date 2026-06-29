@@ -9,6 +9,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"  # 限制线程数避免forkserver问�
 
 import sys
 import gc
+import argparse
 import getopt
 import logging
 import functools
@@ -20,7 +21,7 @@ from rich.logging import RichHandler
 
 from dragon3_pipelines.config import ConfigManager
 from dragon3_pipelines.io import HDF5FileProcessor, LagrFileProcessor
-from dragon3_pipelines.visualization import HDF5Visualizer, LagrVisualizer
+from dragon3_pipelines.visualization import HDF5Visualizer, LagrVisualizer, PlotPurger
 from dragon3_pipelines.analysis import CurrentMassLagrangianProcessor, ParticleTracker
 
 # Setup logger
@@ -241,18 +242,101 @@ class SimulationPlotter:
                         progress.advance(task)
 
 
-def main() -> int:
-    """Main CLI entry point"""
+def _build_purge_parser() -> argparse.ArgumentParser:
+    """Build the purge subcommand parser."""
+    parser = argparse.ArgumentParser(prog="python -m dragon3_pipelines purge")
+    parser.add_argument(
+        "target", nargs="?", help="Purge target, e.g. single or binary.create_ecc_semi_plot_density"
+    )
+    parser.add_argument("--simu", dest="simu_name", help="Limit purge to one simulation")
+    parser.add_argument(
+        "--all-sims",
+        action="store_true",
+        help="Match every configured simulation prefix",
+    )
+    parser.add_argument("--plot-dir", help="Override configured plot directory")
+    parser.add_argument(
+        "--filename-suffix", help="Match a custom filename suffix, or '*' for any suffix"
+    )
+    parser.add_argument("--dry-run", action="store_true", help="Only preview matched files")
+    parser.add_argument(
+        "--yes", action="store_true", help="Delete without interactive prompt after preview"
+    )
+    parser.add_argument("--list-targets", action="store_true", help="List supported purge targets")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
+    return parser
+
+
+def _main_purge(argv: list[str]) -> int:
+    """Run the purge CLI subcommand."""
+    parser = _build_purge_parser()
+    args = parser.parse_args(argv)
+
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s: %(message)s")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
+
+    if args.list_targets:
+        for target in PlotPurger.list_targets():
+            print(target)
+        return 0
+
+    if args.target is None:
+        parser.error("target is required unless --list-targets is used")
+    if args.simu_name and args.all_sims:
+        parser.error("use either --simu or --all-sims, not both")
+    if not args.simu_name and not args.all_sims:
+        parser.error("use --simu for one simulation or --all-sims for every configured prefix")
+
+    config = ConfigManager(opts=[])
+    purger = PlotPurger(config)
+    simu_name = None if args.all_sims else args.simu_name
+
+    if args.dry_run:
+        result = purger.preview(
+            args.target,
+            simu_name=simu_name,
+            plot_dir=args.plot_dir,
+            filename_suffix=args.filename_suffix,
+        )
+        print(purger.format_preview(result.matched_paths))
+        return 0
+
+    result = purger.purge(
+        args.target,
+        simu_name=simu_name,
+        plot_dir=args.plot_dir,
+        filename_suffix=args.filename_suffix,
+        yes=args.yes,
+    )
+    if result.cancelled:
+        print("Purge cancelled")
+        return 1
+    print(f"Deleted {len(result.deleted_paths)} files")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Main CLI entry point."""
+    if argv is None:
+        argv = sys.argv[1:]
+    if argv and argv[0] == "purge":
+        return _main_purge(argv[1:])
+
     try:
         long_options = ["skip-until=", "debug"]
-        opts, args = getopt.getopt(sys.argv[1:], "k:", long_options)
+        opts, args = getopt.getopt(argv, "k:", long_options)
+        if args:
+            print(f"Unexpected arguments: {' '.join(args)}")
+            return 2
         if "--debug" in dict(opts):
             logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(name)s: %(message)s")
         else:
             logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
     except getopt.GetoptError as err:
         print(err)
-        sys.exit(2)
+        return 2
 
     config = ConfigManager(opts=opts)
 
