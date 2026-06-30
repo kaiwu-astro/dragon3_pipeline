@@ -138,8 +138,6 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
                 color=color,
                 ax=ax,
             )
-            if extra_ax_handler is not None:
-                extra_ax_handler(ax)
             self.decorate_jointfig(
                 ax,
                 single_df_at_t,
@@ -153,6 +151,8 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
                 t_over_tcr0,
                 t_over_trh0,
             )
+            if extra_ax_handler is not None:
+                extra_ax_handler(ax)
             if custom_ax_decorator is not None:
                 custom_ax_decorator(ax)
             self._save_position_figure(fig, ax, save_jpg_path)
@@ -177,7 +177,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             single_df_at_t=single_df_at_t,
             simu_name=simu_name,
             filename_suffix="wide_pc",
-            custom_ax_decorator=_set_wide_pos_lim_pc,
+            extra_ax_handler=_set_wide_pos_lim_pc,
             uniform_color_and_size=True,
         )
 
@@ -256,9 +256,6 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
                 }
                 sns.scatterplot(**plot_kwargs)
 
-        if extra_ax_handler is not None:
-            extra_ax_handler(ax)
-
         self.decorate_jointfig(
             ax,
             processed_df,
@@ -272,6 +269,9 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             t_over_tcr0,
             t_over_trh0,
         )
+
+        if extra_ax_handler is not None:
+            extra_ax_handler(ax)
 
         if ax.legend_ is not None:
             ax.legend_.remove()
@@ -302,7 +302,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             single_df_at_t=single_df_at_t,
             simu_name=simu_name,
             filename_suffix="wide_pc",
-            custom_ax_decorator=_set_wide_pos_lim_pc,
+            extra_ax_handler=_set_wide_pos_lim_pc,
         )
 
     @log_time(logger)

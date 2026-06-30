@@ -154,9 +154,6 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
                 bbox_to_anchor=(1, 1),
             )
 
-        if extra_ax_handler is not None:
-            extra_ax_handler(ax)
-
         self.decorate_jointfig(
             ax,
             binary_df_at_t_cbo,
@@ -170,6 +167,9 @@ class BinaryStarVisualizer(BaseHDF5Visualizer):
             t_over_tcr0,
             t_over_trh0,
         )
+
+        if extra_ax_handler is not None:
+            extra_ax_handler(ax)
 
         if custom_ax_decorator is not None:
             custom_ax_decorator(ax, binary_df_at_t_cbo)

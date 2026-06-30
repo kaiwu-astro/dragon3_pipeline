@@ -274,6 +274,26 @@ class TestSingleStarVisualizer:
         wide_path = tmp_path / "jpg" / "test_output_ttot_1.0_x1_vs_x2_wide_pc.jpg"
         assert plt.imread(standard_path).shape[:2] == plt.imread(wide_path).shape[:2]
 
+    def test_position_plot_wide_pc_uses_max_position_limits(
+        self, mock_config, sample_dataframe, tmp_path
+    ):
+        """Wide position JPG changes only the position limits through the axes handler."""
+        mock_config.plot_dir = str(tmp_path)
+        (tmp_path / "jpg").mkdir()
+        vis = SingleStarVisualizer(mock_config)
+        observed = {}
+
+        def capture_limits(fig, ax, save_jpg_path):
+            observed["xlim"] = ax.get_xlim()
+            observed["ylim"] = ax.get_ylim()
+            plt.close(fig)
+
+        with patch.object(vis, "_save_position_figure", side_effect=capture_limits):
+            vis.create_position_plot_wide_pc_jpg(sample_dataframe, "test_sim")
+
+        assert observed["xlim"] == mock_config.limits["position_pc_lim_MAX"]
+        assert observed["ylim"] == mock_config.limits["position_pc_lim_MAX"]
+
     def test_highlight_position_plot_wide_pc_matches_standard_canvas(
         self, mock_config, sample_dataframe, tmp_path
     ):
@@ -330,6 +350,39 @@ class TestBinaryStarVisualizer:
         assert isinstance(result, dict)
         assert "marker" in result
         assert "markerfacecolor" in result
+
+    def test_compact_object_binary_extra_ax_handler_runs_after_default_limits(
+        self, mock_config, sample_binary_dataframe, tmp_path
+    ):
+        """Binary compact-object plots keep axes changes made by extra_ax_handler."""
+        mock_config.plot_dir = str(tmp_path)
+        (tmp_path / "jpg").mkdir()
+        vis = BinaryStarVisualizer(mock_config)
+        observed = {}
+
+        def set_custom_limits(ax):
+            ax.set_xlim(-50, 50)
+            ax.set_ylim(-75, 75)
+
+        def capture_limits(ax, df):
+            observed["xlim"] = ax.get_xlim()
+            observed["ylim"] = ax.get_ylim()
+
+        vis._create_base_jpg_plot_compact_object_only(
+            sample_binary_dataframe,
+            simu_name="test_sim",
+            x_col="Bin cm X [pc]",
+            y_col="Bin cm V1",
+            log_scale=(False, False),
+            xlim_key="position_pc_lim",
+            ylim_key="velocity_kmps_lim",
+            filename_var_part="bin_vx_vs_x_compact_objects_only",
+            extra_ax_handler=set_custom_limits,
+            custom_ax_decorator=capture_limits,
+        )
+
+        assert observed["xlim"] == (-50, 50)
+        assert observed["ylim"] == (-75, 75)
 
 
 class TestLagrVisualizer:
