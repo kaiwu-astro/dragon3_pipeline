@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List
 import numpy as np
 import pandas as pd
 
+from dragon3_pipelines.analysis.cache_paths import CURRENT_LAGRANGIAN_FEATURE, analysis_cache_dir
 from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
     HDF5ScanOptions,
@@ -69,7 +70,7 @@ class CurrentMassLagrangianProcessor:
         return {**defaults, **user_config}
 
     def _cache_dir(self, simu_name: str) -> Path:
-        return Path(self.config.particle_df_cache_dir_of[simu_name]) / "current_lagrangian"
+        return analysis_cache_dir(self.config, simu_name, CURRENT_LAGRANGIAN_FEATURE)
 
     def _cache_path(self, simu_name: str) -> Path:
         return self._cache_dir(simu_name) / self._current_lagrangian_config()["cache_filename"]

@@ -8,6 +8,7 @@ from typing import Any, Dict, Mapping, Sequence
 
 import pandas as pd
 
+from dragon3_pipelines.analysis.cache_paths import BINARY_STELLAR_TYPE_FEATURE, analysis_cache_dir
 from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
     HDF5ScanOptions,
@@ -222,7 +223,7 @@ class BinaryStellarTypeTask(FeatherMetaCacheMixin):
         return {**defaults, **user_config}
 
     def _cache_dir(self) -> Path:
-        return Path(self.config.particle_df_cache_dir_of[self.simu_name]) / "binary_stellar_type"
+        return analysis_cache_dir(self.config, self.simu_name, BINARY_STELLAR_TYPE_FEATURE)
 
     def _cache_path_for_last_ttot(self, last_ttot: float) -> Path:
         pattern = self._config()["cache_filename_template"]

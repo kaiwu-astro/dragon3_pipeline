@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 import pandas as pd
 
+from dragon3_pipelines.analysis.cache_paths import PRIMORDIAL_BINARY_FEATURE, analysis_cache_dir
 from dragon3_pipelines.io import HDF5FileProcessor
 
 logger = logging.getLogger(__name__)
@@ -130,7 +131,7 @@ class PrimordialBinaryIdentifier:
         return primordial.reset_index(drop=True)
 
     def _cache_dir(self, simu_name: str) -> Path:
-        return Path(self.config.particle_df_cache_dir_of[simu_name]) / "primordial_binary"
+        return analysis_cache_dir(self.config, simu_name, PRIMORDIAL_BINARY_FEATURE)
 
     def _cache_path(self, simu_name: str) -> Path:
         return self._cache_dir(simu_name) / "primordial_binaries.feather"

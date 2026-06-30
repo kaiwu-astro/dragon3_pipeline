@@ -562,7 +562,10 @@ class TestCurrentMassLagrangianProcessor:
     @pytest.fixture
     def mock_config(self, tmp_path):
         config = Mock()
-        config.particle_df_cache_dir_of = {"test_simu": str(tmp_path / "cache")}
+        config.analysis_cache_dir_of = {"test_simu": str(tmp_path / "cache" / "test_simu")}
+        config.particle_df_cache_dir_of = {
+            "test_simu": str(tmp_path / "cache" / "test_simu" / "particle_df")
+        }
         config.pathof = {"test_simu": str(tmp_path)}
         config.current_lagrangian = {
             "enabled": True,
@@ -642,8 +645,12 @@ class TestCurrentMassLagrangianProcessor:
             use_cache=True,
             write_cache=False,
         )
-        assert (tmp_path / "cache" / "current_lagrangian" / "current_mass_lagr.feather").exists()
-        assert (tmp_path / "cache" / "current_lagrangian" / "current_mass_lagr.meta.json").exists()
+        assert (
+            tmp_path / "cache" / "test_simu" / "current_lagrangian" / "current_mass_lagr.feather"
+        ).exists()
+        assert (
+            tmp_path / "cache" / "test_simu" / "current_lagrangian" / "current_mass_lagr.meta.json"
+        ).exists()
 
     def test_update_can_insert_intermediate_time(self, mock_config, tmp_path):
         processor = CurrentMassLagrangianProcessor(mock_config)
@@ -840,7 +847,10 @@ class TestSimulationPlotterCurrentLagrangian:
         config.current_lagrangian = {"enabled": True}
         config.processes_count = 1
         config.tasks_per_child = 1
-        config.particle_df_cache_dir_of = {"test_simu": str(tmp_path / "cache")}
+        config.analysis_cache_dir_of = {"test_simu": str(tmp_path / "cache" / "test_simu")}
+        config.particle_df_cache_dir_of = {
+            "test_simu": str(tmp_path / "cache" / "test_simu" / "particle_df")
+        }
 
         class FakePool:
             def __enter__(self):

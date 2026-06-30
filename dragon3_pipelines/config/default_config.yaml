@@ -16,8 +16,8 @@ paths:
   # Plot directory
   plot_dir: "/p/home/jusers/wu13/juwels/scratch/plot"
 
-  # Cache directory suffix
-  cache_dir_suffix: "/particle_df_cache"
+  # Full root for analysis-produced intermediate caches
+  analysis_cache_dir: "/p/home/jusers/wu13/juwels/scratch/dragon3_intermediate_data_cache"
 
 # Figure name prefixes
 figure_prefixes:

@@ -72,6 +72,29 @@ class TestConfigManager:
         assert isinstance(config, ConfigManager)
         assert hasattr(config, "pathof")
 
+    def test_default_analysis_cache_paths(self):
+        """Test default analysis cache root and derived feature directories."""
+        config = ConfigManager()
+        root = "/p/home/jusers/wu13/juwels/scratch/dragon3_pipelines_cache"
+
+        assert config.analysis_cache_dir == root
+        assert config.analysis_cache_dir_of["0sb"] == f"{root}/0sb"
+        assert config.particle_df_cache_dir_of["0sb"] == f"{root}/0sb/particle_df"
+
+    def test_user_config_overrides_analysis_cache_dir(self, temp_dir):
+        """Test user config can override the analysis cache root."""
+        root = str(temp_dir / "analysis_cache")
+        user_config = {"paths": {"analysis_cache_dir": root}}
+        user_config_path = temp_dir / "user_cache_config.yaml"
+        with open(user_config_path, "w") as f:
+            yaml.dump(user_config, f)
+
+        config = ConfigManager(config_path=str(user_config_path))
+
+        assert config.analysis_cache_dir == root
+        assert config.analysis_cache_dir_of["0sb"] == f"{root}/0sb"
+        assert config.particle_df_cache_dir_of["0sb"] == f"{root}/0sb/particle_df"
+
     def test_user_config_merge(self, temp_dir):
         """Test merging user configuration with defaults"""
         # Create a user config file

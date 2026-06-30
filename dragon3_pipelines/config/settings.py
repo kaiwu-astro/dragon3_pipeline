@@ -71,10 +71,9 @@ class ConfigManager:
         self.pathof: Dict[str, str] = paths["simulations"]
         self.plot_dir: str = paths["plot_dir"]
 
-        # Build derived paths
-        self.particle_df_cache_dir_of = {
-            k: v + paths["cache_dir_suffix"] for k, v in self.pathof.items()
-        }
+        self.analysis_cache_dir: Optional[str] = paths.get("analysis_cache_dir")
+        self._legacy_cache_dir_suffix: Optional[str] = paths.get("cache_dir_suffix")
+
         self.input_file_path_of = {
             k: self.pathof[k] + "/" + paths["input_files"][k] for k in self.pathof.keys()
         }
@@ -143,6 +142,10 @@ class ConfigManager:
                 self.pathof.update(user_config["paths"]["simulations"])
             if "plot_dir" in user_config["paths"]:
                 self.plot_dir = user_config["paths"]["plot_dir"]
+            if "analysis_cache_dir" in user_config["paths"]:
+                self.analysis_cache_dir = user_config["paths"]["analysis_cache_dir"]
+            elif "cache_dir_suffix" in user_config["paths"] and not self.analysis_cache_dir:
+                self._legacy_cache_dir_suffix = user_config["paths"]["cache_dir_suffix"]
 
         if "processing" in user_config:
             proc = user_config["processing"]
@@ -165,6 +168,24 @@ class ConfigManager:
 
     def _setup_derived_attributes(self) -> None:
         """Set up derived attributes that depend on configuration"""
+        if self.analysis_cache_dir:
+            analysis_root = Path(self.analysis_cache_dir)
+            self.analysis_cache_dir_of = {
+                simu_name: str(analysis_root / simu_name) for simu_name in self.pathof
+            }
+            self.particle_df_cache_dir_of = {
+                simu_name: str(Path(cache_dir) / "particle_df")
+                for simu_name, cache_dir in self.analysis_cache_dir_of.items()
+            }
+        elif self._legacy_cache_dir_suffix:
+            self.analysis_cache_dir_of = {
+                simu_name: str(Path(path) / self._legacy_cache_dir_suffix.lstrip("/"))
+                for simu_name, path in self.pathof.items()
+            }
+            self.particle_df_cache_dir_of = dict(self.analysis_cache_dir_of)
+        else:
+            raise ValueError("paths.analysis_cache_dir is required for analysis cache paths.")
+
         # Calculate memory capacity
         try:
             total_mem_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")

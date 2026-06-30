@@ -11,6 +11,7 @@ import pandas as pd
 from rich.progress import Progress, track
 from glob import glob
 
+from dragon3_pipelines.analysis.cache_paths import PARTICLE_DF_FEATURE, analysis_cache_dir
 from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.utils import log_time
 
@@ -46,6 +47,9 @@ class ParticleTracker:
         """
         self.config = config_manager
         self.hdf5_file_processor = HDF5FileProcessor(config_manager)
+
+    def _particle_cache_base(self, simu_name: str) -> str:
+        return str(analysis_cache_dir(self.config, simu_name, PARTICLE_DF_FEATURE))
 
     @log_time(logger)
     def get_particle_df_from_hdf5_file(
@@ -293,7 +297,7 @@ class ParticleTracker:
                 ]
                 logger.debug("Particle dfs merged. Writing to disk...")
 
-                cache_base = self.config.particle_df_cache_dir_of[simu_name]
+                cache_base = self._particle_cache_base(simu_name)
                 particle_dir_0 = os.path.join(cache_base, str(particle_names[0]))
                 os.makedirs(particle_dir_0, exist_ok=True)
                 cache_file_count_0 = len(
@@ -374,7 +378,7 @@ class ParticleTracker:
         for pn in particle_names:
             until_files = glob(
                 os.path.join(
-                    self.config.particle_df_cache_dir_of[simu_name],
+                    self._particle_cache_base(simu_name),
                     str(pn),
                     f"{pn}_history_until_*.df.feather",
                 )
@@ -391,7 +395,7 @@ class ParticleTracker:
                 )
 
         part_files = glob(
-            os.path.join(self.config.particle_df_cache_dir_of[simu_name], "*_df_*to*.df.feather")
+            os.path.join(self._particle_cache_base(simu_name), "*_df_*to*.df.feather")
         )
         if part_files:
             logger.warning(
@@ -434,7 +438,7 @@ class ParticleTracker:
         Returns:
             DataFrame containing complete particle evolution history
         """
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        cache_base = self._particle_cache_base(simu_name)
         os.makedirs(cache_base, exist_ok=True)
 
         # Try to read from new merged cache format first
@@ -624,8 +628,9 @@ class ParticleTracker:
             )
 
         # Build path from simu_name and particle_name
-        cache_base = self.config.particle_df_cache_dir_of.get(simu_name)
-        if cache_base is None:
+        try:
+            cache_base = self._particle_cache_base(simu_name)
+        except (AttributeError, KeyError):
             logger.warning(f"No cache directory configured for simulation: {simu_name}")
             return pd.DataFrame()
 
@@ -804,7 +809,7 @@ class ParticleTracker:
             Dictionary mapping particle_name -> last processed time.
             Returns -1.0 for particles with no history file or missing directory.
         """
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        cache_base = self._particle_cache_base(simu_name)
         progress_dict: Dict[int, float] = {}
 
         # Regex pattern for extracting timestamp from filename
@@ -961,7 +966,7 @@ class ParticleTracker:
             use_miltithread: Whether to use multithreading when reading feather files
         """
 
-        cache_base = self.config.particle_df_cache_dir_of[simu_name]
+        cache_base = self._particle_cache_base(simu_name)
         particle_dir = os.path.join(cache_base, str(particle_name))
         os.makedirs(particle_dir, exist_ok=True)
 

@@ -9,6 +9,7 @@ from typing import Any, Dict, Mapping, Sequence
 
 import pandas as pd
 
+from dragon3_pipelines.analysis.cache_paths import B_TYPE_BINARY_FEATURE, analysis_cache_dir
 from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
     HDF5ScanOptions,
@@ -260,7 +261,7 @@ class BTypeBinaryTask(FeatherMetaCacheMixin):
         return rows
 
     def _cache_dir(self) -> Path:
-        return Path(self.config.particle_df_cache_dir_of[self.simu_name]) / "b_type_binary"
+        return analysis_cache_dir(self.config, self.simu_name, B_TYPE_BINARY_FEATURE)
 
     def _cache_path_for_last_ttot(self, last_ttot: float) -> Path:
         return self._cache_dir() / f"b_type_binaries_until_{last_ttot:.6f}.feather"

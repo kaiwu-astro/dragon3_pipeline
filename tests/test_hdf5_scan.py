@@ -19,7 +19,8 @@ from dragon3_pipelines.io import HDF5FileProcessor
 def make_config(tmp_path: Path) -> Mock:
     config = Mock()
     config.pathof = {"sim": str(tmp_path)}
-    config.particle_df_cache_dir_of = {"sim": str(tmp_path / "cache")}
+    config.analysis_cache_dir_of = {"sim": str(tmp_path / "cache" / "sim")}
+    config.particle_df_cache_dir_of = {"sim": str(tmp_path / "cache" / "sim" / "particle_df")}
     config.input_file_path_of = {"sim": str(tmp_path / "input.inp")}
     config.processes_count = 2
     config.kw_to_stellar_type = {1: "MS", 13: "NS", 14: "BH"}
@@ -51,6 +52,18 @@ def test_binary_stellar_type_resolves_type_and_kw(tmp_path: Path) -> None:
         extractor.resolve_target(stellar_type="NOPE")
     with pytest.raises(ValueError, match="Unknown KW"):
         extractor.resolve_target(kw=99)
+
+
+def test_analysis_cache_helper_accepts_legacy_particle_cache_mock(tmp_path: Path) -> None:
+    config = Mock()
+    config.particle_df_cache_dir_of = {"sim": str(tmp_path / "legacy_cache")}
+    config.kw_to_stellar_type = {14: "BH"}
+    config.stellar_type_to_kw = {"BH": 14}
+    config.binary_stellar_type_extraction = {}
+
+    task = BinaryStellarTypeExtractor(config)
+    assert task.load_binaries_with_stellar_type("sim", stellar_type="BH", update=False).empty
+    assert (tmp_path / "legacy_cache" / "binary_stellar_type").exists() is False
 
 
 class FakeProcessor:
@@ -96,7 +109,7 @@ def test_binary_extractor_returns_full_matching_binary_rows_and_writes_meta(tmp_
     assert len(result) == 2
     assert set(result["extra_processed_column"]) == {"keep-a", "keep-b"}
     assert list(result["TTOT"]) == [1.0, 1.0]
-    cache_files = list((tmp_path / "cache" / "binary_stellar_type").glob("*.feather"))
+    cache_files = list((tmp_path / "cache" / "sim" / "binary_stellar_type").glob("*.feather"))
     assert cache_files[0].name == "binaries_with_14_BH_until_2.000000.feather"
     meta = json.loads(cache_files[0].with_name(cache_files[0].stem + ".meta.json").read_text())
     assert meta["target_kw"] == 14
@@ -124,7 +137,7 @@ def test_binary_extractor_writes_metadata_for_empty_match(tmp_path: Path) -> Non
     result = extractor.load_binaries_with_stellar_type("sim", kw=14)
 
     assert result.empty
-    cache_files = list((tmp_path / "cache" / "binary_stellar_type").glob("*.feather"))
+    cache_files = list((tmp_path / "cache" / "sim" / "binary_stellar_type").glob("*.feather"))
     assert cache_files
     meta = json.loads(cache_files[0].with_name(cache_files[0].stem + ".meta.json").read_text())
     assert meta["processed_files"][str(hdf5_path)]["ttot"] == [1.0]
@@ -275,8 +288,8 @@ def test_primordial_identifier_filters_adjacent_integer_name_pairs(tmp_path: Pat
     assert result["is_primordial_binary"].tolist() == [True, True]
     assert fake_processor.read_count == 1
 
-    cache_path = tmp_path / "cache" / "primordial_binary" / "primordial_binaries.feather"
-    meta_path = tmp_path / "cache" / "primordial_binary" / "primordial_binaries.meta.json"
+    cache_path = tmp_path / "cache" / "sim" / "primordial_binary" / "primordial_binaries.feather"
+    meta_path = tmp_path / "cache" / "sim" / "primordial_binary" / "primordial_binaries.meta.json"
     assert cache_path.exists()
     meta = json.loads(meta_path.read_text())
     assert meta["schema_version"] == 1
@@ -429,7 +442,9 @@ def test_b_type_extractor_filters_members_marks_primordial_and_writes_meta(
     assert result["is_primordial_binary"].tolist() == [True, True, False]
     assert "extra_processed_column" in result.columns
 
-    cache_path = tmp_path / "cache" / "b_type_binary" / "b_type_binaries_until_1.000000.feather"
+    cache_path = (
+        tmp_path / "cache" / "sim" / "b_type_binary" / "b_type_binaries_until_1.000000.feather"
+    )
     meta_path = cache_path.with_name(cache_path.stem + ".meta.json")
     assert cache_path.exists()
     meta = json.loads(meta_path.read_text())
@@ -474,7 +489,9 @@ def test_b_type_extractor_refreshes_when_primordial_cache_changes(tmp_path: Path
     assert first["is_primordial_binary"].tolist() == [True]
     assert fake_processor.read_count == 2
 
-    primordial_meta = tmp_path / "cache" / "primordial_binary" / "primordial_binaries.meta.json"
+    primordial_meta = (
+        tmp_path / "cache" / "sim" / "primordial_binary" / "primordial_binaries.meta.json"
+    )
     meta = json.loads(primordial_meta.read_text())
     meta["row_count"] = 0
     primordial_meta.write_text(json.dumps(meta, indent=2, sort_keys=True))
