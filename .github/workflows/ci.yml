@@ -15,21 +15,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-    
-    - name: Run tests with pytest
-      run: |
-        pytest tests/ -v --cov=dragon3_pipelines --cov-report=xml --cov-report=term
-    
+
+    - name: Run CI
+      run: ./scripts/ci.sh
+
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
       with:

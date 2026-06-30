@@ -180,6 +180,13 @@ def process_data(
 - `python -m dragon3_pipelines help purge`：查看 purge 子命令用法
 
 ### 测试命令
+Agent Coding 完成代码修改后，必要测试流程是运行项目统一 CI 脚本：
+```bash
+./scripts/ci.sh
+```
+
+该脚本是 GitHub Actions 与本地开发共用的测试入口。
+
 运行所有测试：
 ```bash
 pytest tests/ -v
@@ -206,9 +213,7 @@ pytest tests/test_config.py -v
 - Python 3.11, 3.12, 3.13
 
 **CI 步骤：**
-1. 安装依赖：`pip install -e ".[dev]"`
-2. 运行测试：`pytest tests/ -v --cov=dragon3_pipelines`
-3. 上传覆盖率到 Codecov
+参见 .github/workflows/ci.yml
 
 **Pre-commit Hooks：**
 项目配置了 pre-commit（见 `.pre-commit-config.yaml`）：
