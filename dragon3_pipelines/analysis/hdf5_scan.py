@@ -1,4 +1,10 @@
-"""Shared HDF5 scanning utilities for analysis data reduction tasks."""
+"""
+Shared HDF5 scanning utilities for analysis data reduction tasks.
+
+The plottable information contained in an HDF5 file can be broadly divided into two types:
+- Microscopic information: A single snapshot contains a large amount of information, such as the state of each star in that snapshot. For this type, each HDF5 file can generate one plot. This is implemented in SimulationPlotter.plot_hdf5_file.
+- Macroscopic information: For example, statistical information, where a single snapshot contains only one data point. To plot such an evolutionary diagram, it is necessary to loop through almost all HDF5 files in order to obtain a sequence of values. This is implemented in this module.
+"""
 
 from __future__ import annotations
 
