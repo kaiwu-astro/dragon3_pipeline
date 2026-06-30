@@ -147,6 +147,8 @@ plot_patterns=(
     "_a_vs_distance.jpg"
     "_a_vs_distance_compact_objects_only.jpg"
     "_x1_vs_x2_wide_pc.jpg"
+    "_orbital_xT_vs_xR_wide_pc.jpg"
+    "_orbital_xT_vs_xL_wide_pc.jpg"
     "_x1_vs_x2_highlight_compact_objects.jpg"
     "_x1_vs_x2_highlight_compact_objects_wide_pc.jpg"
 )

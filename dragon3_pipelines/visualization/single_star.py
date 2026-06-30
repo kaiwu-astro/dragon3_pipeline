@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 class SingleStarVisualizer(BaseHDF5Visualizer):
     """Visualizer for single star data"""
 
+    ORBITAL_X_R_COL = "x_R [pc]"
+    ORBITAL_X_T_COL = "x_T [pc]"
+    ORBITAL_X_L_COL = "x_L [pc]"
+
     def _save_position_figure(self, fig: plt.Figure, ax: plt.Axes, save_jpg_path: str) -> None:
         """Save position plots with fixed canvas size and square data axes."""
         ax.set_aspect("equal", adjustable="box")
@@ -179,6 +183,134 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             filename_suffix="wide_pc",
             extra_ax_handler=_set_wide_pos_lim_pc,
             uniform_color_and_size=True,
+        )
+
+    def _orbital_frame_basis(
+        self, scalar_row_at_t: pd.Series
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return orbital-frame unit vectors (e_R, e_T, e_L) from scalar RG/VG columns."""
+        rg = np.array([scalar_row_at_t[f"RG({i})"] for i in range(1, 4)], dtype=float)
+        vg = np.array([scalar_row_at_t[f"VG({i})"] for i in range(1, 4)], dtype=float)
+        angular_momentum = np.cross(rg, vg)
+
+        rg_norm = np.linalg.norm(rg)
+        angular_momentum_norm = np.linalg.norm(angular_momentum)
+        if (
+            not np.isfinite(rg).all()
+            or not np.isfinite(vg).all()
+            or not np.isfinite(rg_norm)
+            or not np.isfinite(angular_momentum_norm)
+            or rg_norm == 0
+            or angular_momentum_norm == 0
+        ):
+            raise ValueError("Degenerate or non-finite orbital-frame RG/VG vectors")
+
+        e_r = rg / rg_norm
+        e_l = angular_momentum / angular_momentum_norm
+        e_t = np.cross(e_l, e_r)
+        return e_r, e_t, e_l
+
+    def _single_df_with_orbital_frame_positions(
+        self, single_df_at_t: pd.DataFrame, scalar_row_at_t: pd.Series
+    ) -> pd.DataFrame | None:
+        """Project cluster-centered particle positions onto the snapshot orbital frame."""
+        try:
+            e_r, e_t, e_l = self._orbital_frame_basis(scalar_row_at_t)
+            positions = single_df_at_t[["X [pc]", "Y [pc]", "Z [pc]"]].to_numpy(dtype=float)
+        except (KeyError, TypeError, ValueError) as exc:
+            ttot = single_df_at_t["TTOT"].iloc[0] if "TTOT" in single_df_at_t else "unknown"
+            logger.warning("Skipping orbital-frame position plot at TTOT=%s: %s", ttot, exc)
+            return None
+
+        projected_df = single_df_at_t.copy()
+        projected_df[self.ORBITAL_X_R_COL] = positions @ e_r
+        projected_df[self.ORBITAL_X_T_COL] = positions @ e_t
+        projected_df[self.ORBITAL_X_L_COL] = positions @ e_l
+        return projected_df
+
+    def _create_position_plot_orbital_wide_pc_jpg(
+        self,
+        single_df_at_t: pd.DataFrame,
+        scalar_row_at_t: pd.Series,
+        simu_name: str,
+        y_col: str,
+        filename_var_part: str,
+    ) -> None:
+        """Create a wide single-star position plot in the snapshot orbital frame."""
+        projected_df = self._single_df_with_orbital_frame_positions(single_df_at_t, scalar_row_at_t)
+        if projected_df is None:
+            return
+
+        ttot = projected_df["TTOT"].iloc[0]
+        tmyr = projected_df["Time[Myr]"].iloc[0]
+        t_over_tcr0 = projected_df["TTOT/TCR0"].iloc[0]
+        t_over_trh0 = projected_df["TTOT/TRH0"].iloc[0]
+        save_jpg_path = (
+            f"{self.config.plot_dir}/jpg/"
+            f"{self.config.figname_prefix[simu_name]}output_ttot_{ttot}_{filename_var_part}.jpg"
+        )
+        if self.config.skip_existing_plot and os.path.exists(save_jpg_path):
+            logger.debug(f"Skip existing plot: {save_jpg_path}")
+            return
+
+        position_pc_lim_max = self.config.limits["position_pc_lim_MAX"]
+        with plt.style.context("dark_background"):
+            fig, ax = plt.subplots()
+            ax = sns.scatterplot(
+                data=projected_df,
+                x=self.ORBITAL_X_T_COL,
+                y=y_col,
+                marker=".",
+                lw=0,
+                s=10,
+                color="white",
+                ax=ax,
+            )
+            self.decorate_jointfig(
+                ax,
+                projected_df,
+                self.ORBITAL_X_T_COL,
+                y_col,
+                position_pc_lim_max,
+                position_pc_lim_max,
+                simu_name,
+                ttot,
+                tmyr,
+                t_over_tcr0,
+                t_over_trh0,
+            )
+            self._save_position_figure(fig, ax, save_jpg_path)
+            try:
+                __IPYTHON__
+                if self.config.close_figure_in_ipython:
+                    plt.close(fig)
+            except NameError:
+                plt.close(fig)
+
+    @log_time(logger)
+    def create_position_plot_orbital_xT_xR_wide_pc_jpg(
+        self, single_df_at_t: pd.DataFrame, scalar_row_at_t: pd.Series, simu_name: str
+    ) -> None:
+        """Create a wide position plot of x_T versus x_R in the orbital frame."""
+        self._create_position_plot_orbital_wide_pc_jpg(
+            single_df_at_t=single_df_at_t,
+            scalar_row_at_t=scalar_row_at_t,
+            simu_name=simu_name,
+            y_col=self.ORBITAL_X_R_COL,
+            filename_var_part="orbital_xT_vs_xR_wide_pc",
+        )
+
+    @log_time(logger)
+    def create_position_plot_orbital_xT_xL_wide_pc_jpg(
+        self, single_df_at_t: pd.DataFrame, scalar_row_at_t: pd.Series, simu_name: str
+    ) -> None:
+        """Create a wide position plot of x_T versus x_L in the orbital frame."""
+        self._create_position_plot_orbital_wide_pc_jpg(
+            single_df_at_t=single_df_at_t,
+            scalar_row_at_t=scalar_row_at_t,
+            simu_name=simu_name,
+            y_col=self.ORBITAL_X_L_COL,
+            filename_var_part="orbital_xT_vs_xL_wide_pc",
         )
 
     @log_time(logger)

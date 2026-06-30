@@ -80,9 +80,19 @@ class SimulationPlotter:
                 )
                 continue
 
+            scalar_row_at_t = df_dict["scalars"].loc[ttot]
+            if hasattr(scalar_row_at_t, "iloc") and not hasattr(scalar_row_at_t, "dtype"):
+                scalar_row_at_t = scalar_row_at_t.iloc[0]
+
             # 位置散点图
             self.hdf5_visualizer.single.create_position_plot_jpg(single_df_at_t, simu_name)
             self.hdf5_visualizer.single.create_position_plot_wide_pc_jpg(single_df_at_t, simu_name)
+            self.hdf5_visualizer.single.create_position_plot_orbital_xT_xR_wide_pc_jpg(
+                single_df_at_t, scalar_row_at_t, simu_name
+            )
+            self.hdf5_visualizer.single.create_position_plot_orbital_xT_xL_wide_pc_jpg(
+                single_df_at_t, scalar_row_at_t, simu_name
+            )
             self.hdf5_visualizer.single.create_position_plot_hightlight_compact_objects_jpg(
                 single_df_at_t, simu_name
             )

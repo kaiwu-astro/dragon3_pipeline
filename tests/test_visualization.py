@@ -39,6 +39,10 @@ def mock_config():
     config.colname_to_label = {
         "X [pc]": "X Position [pc]",
         "Y [pc]": "Y Position [pc]",
+        "Z [pc]": "Z Position [pc]",
+        "x_R [pc]": "x_R [pc]",
+        "x_T [pc]": "x_T [pc]",
+        "x_L [pc]": "x_L [pc]",
         "M": "Mass [Msolar]",
     }
     config.fixed_width_font_context = {"rc": {"font.family": "monospace"}}
@@ -80,6 +84,7 @@ def sample_dataframe():
             "TTOT/TRH0": [2.0] * 100,
             "X [pc]": np.random.randn(100),
             "Y [pc]": np.random.randn(100),
+            "Z [pc]": np.random.randn(100),
             "M": np.random.uniform(0.5, 2.0, 100),
             "Teff*": np.random.uniform(3000, 10000, 100),
             "L*": np.random.uniform(0.1, 100, 100),
@@ -293,6 +298,76 @@ class TestSingleStarVisualizer:
 
         assert observed["xlim"] == mock_config.limits["position_pc_lim_MAX"]
         assert observed["ylim"] == mock_config.limits["position_pc_lim_MAX"]
+
+    def test_orbital_frame_projection_simple_case(self, mock_config, sample_dataframe):
+        """RG=(1,0,0), VG=(0,1,0) maps X/Y/Z to x_R/x_T/x_L."""
+        vis = SingleStarVisualizer(mock_config)
+        scalar_row = pd.Series(
+            {"RG(1)": 1.0, "RG(2)": 0.0, "RG(3)": 0.0, "VG(1)": 0.0, "VG(2)": 1.0, "VG(3)": 0.0}
+        )
+
+        projected = vis._single_df_with_orbital_frame_positions(sample_dataframe, scalar_row)
+
+        assert projected is not None
+        np.testing.assert_allclose(projected[vis.ORBITAL_X_R_COL], sample_dataframe["X [pc]"])
+        np.testing.assert_allclose(projected[vis.ORBITAL_X_T_COL], sample_dataframe["Y [pc]"])
+        np.testing.assert_allclose(projected[vis.ORBITAL_X_L_COL], sample_dataframe["Z [pc]"])
+
+    def test_orbital_position_plots_match_standard_canvas(
+        self, mock_config, sample_dataframe, tmp_path
+    ):
+        """Orbital wide JPGs use expected names and the same canvas as wide position plots."""
+        mock_config.plot_dir = str(tmp_path)
+        (tmp_path / "jpg").mkdir()
+        vis = SingleStarVisualizer(mock_config)
+        scalar_row = pd.Series(
+            {"RG(1)": 1.0, "RG(2)": 0.0, "RG(3)": 0.0, "VG(1)": 0.0, "VG(2)": 1.0, "VG(3)": 0.0}
+        )
+
+        vis.create_position_plot_wide_pc_jpg(sample_dataframe, "test_sim")
+        vis.create_position_plot_orbital_xT_xR_wide_pc_jpg(sample_dataframe, scalar_row, "test_sim")
+        vis.create_position_plot_orbital_xT_xL_wide_pc_jpg(sample_dataframe, scalar_row, "test_sim")
+
+        wide_path = tmp_path / "jpg" / "test_output_ttot_1.0_x1_vs_x2_wide_pc.jpg"
+        orbital_xr_path = tmp_path / "jpg" / "test_output_ttot_1.0_orbital_xT_vs_xR_wide_pc.jpg"
+        orbital_xl_path = tmp_path / "jpg" / "test_output_ttot_1.0_orbital_xT_vs_xL_wide_pc.jpg"
+        assert orbital_xr_path.exists()
+        assert orbital_xl_path.exists()
+        assert plt.imread(wide_path).shape[:2] == plt.imread(orbital_xr_path).shape[:2]
+        assert plt.imread(wide_path).shape[:2] == plt.imread(orbital_xl_path).shape[:2]
+
+    def test_orbital_position_plots_use_max_position_limits(
+        self, mock_config, sample_dataframe, tmp_path
+    ):
+        """Orbital wide position JPGs use position_pc_lim_MAX for both axes."""
+        mock_config.plot_dir = str(tmp_path)
+        (tmp_path / "jpg").mkdir()
+        vis = SingleStarVisualizer(mock_config)
+        scalar_row = pd.Series(
+            {"RG(1)": 1.0, "RG(2)": 0.0, "RG(3)": 0.0, "VG(1)": 0.0, "VG(2)": 1.0, "VG(3)": 0.0}
+        )
+        observed = {}
+
+        def capture_limits(fig, ax, save_jpg_path):
+            observed[Path(save_jpg_path).name] = (ax.get_xlim(), ax.get_ylim())
+            plt.close(fig)
+
+        with patch.object(vis, "_save_position_figure", side_effect=capture_limits):
+            vis.create_position_plot_orbital_xT_xR_wide_pc_jpg(
+                sample_dataframe, scalar_row, "test_sim"
+            )
+            vis.create_position_plot_orbital_xT_xL_wide_pc_jpg(
+                sample_dataframe, scalar_row, "test_sim"
+            )
+
+        assert observed["test_output_ttot_1.0_orbital_xT_vs_xR_wide_pc.jpg"] == (
+            mock_config.limits["position_pc_lim_MAX"],
+            mock_config.limits["position_pc_lim_MAX"],
+        )
+        assert observed["test_output_ttot_1.0_orbital_xT_vs_xL_wide_pc.jpg"] == (
+            mock_config.limits["position_pc_lim_MAX"],
+            mock_config.limits["position_pc_lim_MAX"],
+        )
 
     def test_highlight_position_plot_wide_pc_matches_standard_canvas(
         self, mock_config, sample_dataframe, tmp_path

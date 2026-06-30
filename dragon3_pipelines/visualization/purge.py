@@ -41,6 +41,16 @@ SINGLE_TARGETS: tuple[PlotTarget, ...] = (
     PlotTarget("single", "create_position_plot_wide_pc_jpg", "x1_vs_x2_wide_pc"),
     PlotTarget(
         "single",
+        "create_position_plot_orbital_xT_xR_wide_pc_jpg",
+        "orbital_xT_vs_xR_wide_pc",
+    ),
+    PlotTarget(
+        "single",
+        "create_position_plot_orbital_xT_xL_wide_pc_jpg",
+        "orbital_xT_vs_xL_wide_pc",
+    ),
+    PlotTarget(
+        "single",
         "create_position_plot_hightlight_compact_objects_jpg",
         "x1_vs_x2_highlight_compact_objects",
         True,
