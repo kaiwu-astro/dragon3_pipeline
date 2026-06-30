@@ -8,6 +8,7 @@ __version__ = "0.1.0"
 
 if TYPE_CHECKING:
     from dragon3_pipelines.__main__ import SimulationPlotter, main
+    from dragon3_pipelines.analysis import BinaryStellarTypeExtractor, PrimordialBinaryIdentifier
 
 
 def __getattr__(name: str) -> Any:
@@ -18,11 +19,18 @@ def __getattr__(name: str) -> Any:
         exported = {"main": main, "SimulationPlotter": SimulationPlotter}
         globals().update(exported)
         return exported[name]
-    if name == "BinaryStellarTypeExtractor":
-        from dragon3_pipelines.analysis import BinaryStellarTypeExtractor
+    if name in {"BinaryStellarTypeExtractor", "PrimordialBinaryIdentifier"}:
+        from dragon3_pipelines.analysis import (
+            BinaryStellarTypeExtractor,
+            PrimordialBinaryIdentifier,
+        )
 
-        globals()[name] = BinaryStellarTypeExtractor
-        return BinaryStellarTypeExtractor
+        exported = {
+            "BinaryStellarTypeExtractor": BinaryStellarTypeExtractor,
+            "PrimordialBinaryIdentifier": PrimordialBinaryIdentifier,
+        }
+        globals().update(exported)
+        return exported[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -32,4 +40,5 @@ __all__ = [
     "main",
     "SimulationPlotter",
     "BinaryStellarTypeExtractor",
+    "PrimordialBinaryIdentifier",
 ]

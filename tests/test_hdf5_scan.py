@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from dragon3_pipelines.analysis.binary_stellar_type import BinaryStellarTypeExtractor
+from dragon3_pipelines.analysis.primordial_binary import PrimordialBinaryIdentifier
 from dragon3_pipelines.analysis.hdf5_scan import HDF5ScanOptions, HDF5ScanRunner
 from dragon3_pipelines.io import HDF5FileProcessor
 
@@ -233,3 +234,146 @@ def test_scan_runner_reads_each_hdf5_file_once_for_multiple_tasks(tmp_path: Path
     assert result["b"]["task"].tolist() == ["b"]
     assert task_a.writes == 1
     assert task_b.writes == 1
+
+
+def make_primordial_tables(
+    hdf5_path: Path, binaries: pd.DataFrame
+) -> dict[str, dict[str, pd.DataFrame]]:
+    return {
+        str(hdf5_path): {
+            "scalars": pd.DataFrame({"TTOT": sorted(binaries["TTOT"].unique())}).set_index(
+                "TTOT", drop=False
+            ),
+            "binaries": binaries,
+        }
+    }
+
+
+def test_primordial_identifier_filters_adjacent_integer_name_pairs(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_0.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame(
+        {
+            "Bin Name1": [1, 10, 4],
+            "Bin Name2": [2, 9, 6],
+            "TTOT": [0.0, 0.0, 0.0],
+            "extra_processed_column": ["keep-a", "keep-b", "drop-c"],
+        }
+    )
+    identifier = PrimordialBinaryIdentifier(config)
+    fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
+    identifier.hdf5_file_processor = fake_processor
+
+    result = identifier.load_primordial_binaries("sim", wait_age_hour=0)
+
+    assert result["extra_processed_column"].tolist() == ["keep-a", "keep-b"]
+    assert result["primordial_name_min"].tolist() == [1, 9]
+    assert result["primordial_name_max"].tolist() == [2, 10]
+    assert result["primordial_pair_key"].tolist() == ["1-2", "9-10"]
+    assert result["is_primordial_binary"].tolist() == [True, True]
+    assert fake_processor.read_count == 1
+
+    cache_path = tmp_path / "cache" / "primordial_binary" / "primordial_binaries.feather"
+    meta_path = tmp_path / "cache" / "primordial_binary" / "primordial_binaries.meta.json"
+    assert cache_path.exists()
+    meta = json.loads(meta_path.read_text())
+    assert meta["schema_version"] == 1
+    assert meta["source_hdf5_path"] == str(hdf5_path)
+    assert meta["source_mtime"] == hdf5_path.stat().st_mtime
+    assert meta["discovered_ttot_values"] == [0.0]
+    assert meta["row_count"] == 2
+    assert meta["ttot_rule"] == "binaries['TTOT'].astype(float) == 0.0"
+
+
+def test_primordial_identifier_uses_strict_zero_ttot_snapshot(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_0.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame(
+        {
+            "Bin Name1": [1, 20, 30],
+            "Bin Name2": [2, 21, 31],
+            "TTOT": [0.0, 0.1, 1.0],
+            "extra_processed_column": ["keep-zero", "drop-nonzero", "drop-one"],
+        }
+    )
+    identifier = PrimordialBinaryIdentifier(config)
+    identifier.hdf5_file_processor = FakeProcessor(
+        [str(hdf5_path)], make_primordial_tables(hdf5_path, binaries)
+    )
+
+    result = identifier.load_primordial_binaries("sim", wait_age_hour=0)
+
+    assert result["extra_processed_column"].tolist() == ["keep-zero"]
+    assert result["TTOT"].tolist() == [0.0]
+
+
+def test_primordial_identifier_reuses_fresh_cache_without_rereading_hdf5(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_0.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame({"Bin Name1": [1], "Bin Name2": [2], "TTOT": [0.0]})
+    identifier = PrimordialBinaryIdentifier(config)
+    fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
+    identifier.hdf5_file_processor = fake_processor
+
+    first = identifier.load_primordial_binaries("sim", wait_age_hour=0)
+    second = identifier.load_primordial_binaries("sim", wait_age_hour=0)
+
+    assert fake_processor.read_count == 1
+    pd.testing.assert_frame_equal(first, second)
+
+
+def test_primordial_identifier_update_false_reads_cache(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_0.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame({"Bin Name1": [1], "Bin Name2": [2], "TTOT": [0.0]})
+    identifier = PrimordialBinaryIdentifier(config)
+    fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
+    identifier.hdf5_file_processor = fake_processor
+
+    first = identifier.load_primordial_binaries("sim", wait_age_hour=0)
+    fake_processor.hdf5_paths = []
+    second = identifier.load_primordial_binaries("sim", update=False)
+
+    assert fake_processor.read_count == 1
+    pd.testing.assert_frame_equal(first, second)
+
+
+def test_primordial_identifier_fails_when_no_hdf5_files(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    identifier = PrimordialBinaryIdentifier(config)
+    identifier.hdf5_file_processor = FakeProcessor([], {})
+
+    with pytest.raises(ValueError, match="No HDF5 files"):
+        identifier.load_primordial_binaries("sim", wait_age_hour=0)
+
+
+def test_primordial_identifier_fails_when_required_name_columns_missing(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_0.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame({"Bin Name1": [1], "TTOT": [0.0]})
+    identifier = PrimordialBinaryIdentifier(config)
+    identifier.hdf5_file_processor = FakeProcessor(
+        [str(hdf5_path)], make_primordial_tables(hdf5_path, binaries)
+    )
+
+    with pytest.raises(ValueError, match="Bin Name2"):
+        identifier.load_primordial_binaries("sim", wait_age_hour=0)
+
+
+def test_primordial_identifier_fails_when_zero_ttot_snapshot_missing(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_0.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame({"Bin Name1": [1], "Bin Name2": [2], "TTOT": [0.1]})
+    identifier = PrimordialBinaryIdentifier(config)
+    identifier.hdf5_file_processor = FakeProcessor(
+        [str(hdf5_path)], make_primordial_tables(hdf5_path, binaries)
+    )
+
+    with pytest.raises(ValueError, match="TTOT == 0.0"):
+        identifier.load_primordial_binaries("sim", wait_age_hour=0)

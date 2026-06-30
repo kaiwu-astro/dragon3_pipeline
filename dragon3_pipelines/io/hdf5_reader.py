@@ -661,7 +661,7 @@ class HDF5FileProcessor:
         self,
         simu_name: str,
         wait_age_hour: int = 24,
-        sample_every_nb_time: float = 1.0,
+        sample_every_nb_time: Optional[float] = 1.0,
         exclude_bad_dirname=True,
     ) -> List[str]:
         """
@@ -696,7 +696,7 @@ class HDF5FileProcessor:
         times = np.array(
             [self.get_hdf5_file_time_from_filename(fn) for fn in hdf5_files], dtype=float
         )
-        if sample_every_nb_time <= 0:
+        if sample_every_nb_time is None or sample_every_nb_time <= 0:
             return hdf5_files
 
         targets = np.arange(times[0], times[-1] + sample_every_nb_time, sample_every_nb_time)

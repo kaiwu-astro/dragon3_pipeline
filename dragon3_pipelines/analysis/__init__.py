@@ -4,6 +4,7 @@ from dragon3_pipelines.analysis.particle_tracker import ParticleTracker
 from dragon3_pipelines.analysis.current_lagrangian import CurrentMassLagrangianProcessor
 from dragon3_pipelines.analysis.compact_binary_counter import CompactBinaryCounter
 from dragon3_pipelines.analysis.binary_stellar_type import BinaryStellarTypeExtractor
+from dragon3_pipelines.analysis.primordial_binary import PrimordialBinaryIdentifier
 from dragon3_pipelines.analysis.physics import (
     tau_gw,
     compute_binary_orbit_relative_positions,
@@ -15,6 +16,7 @@ __all__ = [
     "CurrentMassLagrangianProcessor",
     "CompactBinaryCounter",
     "BinaryStellarTypeExtractor",
+    "PrimordialBinaryIdentifier",
     "tau_gw",
     "compute_binary_orbit_relative_positions",
     "compute_individual_orbit_params",
