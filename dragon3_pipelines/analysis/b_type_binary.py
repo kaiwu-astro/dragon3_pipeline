@@ -245,12 +245,13 @@ class BTypeBinaryTask(FeatherMetaCacheMixin):
     def _matching_rows(self, binaries: pd.DataFrame) -> pd.DataFrame:
         member1 = _is_b_type_member(binaries, "1")
         member2 = _is_b_type_member(binaries, "2")
-        rows = binaries.loc[member1 | member2].copy()
+        matching = member1 | member2
+        rows = binaries.loc[matching].copy()
         if rows.empty:
             return rows
 
-        rows["b_type_member1"] = member1.loc[rows.index].to_numpy(dtype=bool)
-        rows["b_type_member2"] = member2.loc[rows.index].to_numpy(dtype=bool)
+        rows["b_type_member1"] = member1.loc[matching].to_numpy(dtype=bool)
+        rows["b_type_member2"] = member2.loc[matching].to_numpy(dtype=bool)
         rows["b_type_member_count"] = rows["b_type_member1"].astype(int) + rows[
             "b_type_member2"
         ].astype(int)

@@ -483,3 +483,33 @@ def test_b_type_extractor_refreshes_when_primordial_cache_changes(tmp_path: Path
 
     assert fake_processor.read_count == 3
     assert second["is_primordial_binary"].tolist() == [True]
+
+
+def test_b_type_extractor_handles_duplicate_binary_indices(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_1.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame(
+        {
+            "Bin KW1": [2, 1, 1],
+            "Bin KW2": [2, 2, 1],
+            "Bin Teff1*": [9000, 20000, 20000],
+            "Bin Teff2*": [9000, 9000, 20000],
+            "Bin M1*": [1.0, 5.0, 5.0],
+            "Bin M2*": [1.0, 1.0, 5.0],
+            "TTOT": [0.0, 1.0, 2.0],
+            "Bin Name1": [1, 10, 20],
+            "Bin Name2": [2, 11, 21],
+        },
+        index=[0, 0, 0],
+    )
+    extractor = BTypeBinaryExtractor(config)
+    extractor.hdf5_file_processor = FakeProcessor(
+        [str(hdf5_path)], make_primordial_tables(hdf5_path, binaries)
+    )
+
+    result = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+
+    assert result["TTOT"].tolist() == [1.0, 2.0]
+    assert result["b_type_member1"].tolist() == [True, True]
+    assert result["b_type_member2"].tolist() == [False, True]
