@@ -245,6 +245,56 @@ class TestSingleStarVisualizer:
         vis = SingleStarVisualizer(mock_config)
         assert vis.config == mock_config
 
+    def test_save_position_figure_uses_square_axes(self, mock_config, tmp_path):
+        """Position plot helper keeps the central axes square."""
+        vis = SingleStarVisualizer(mock_config)
+        fig, ax = plt.subplots()
+        ax.set_xlim(-50, 50)
+        ax.set_ylim(-50, 50)
+
+        vis._save_position_figure(fig, ax, str(tmp_path / "position.jpg"))
+        fig.canvas.draw()
+        bbox = ax.get_window_extent()
+
+        assert abs(bbox.width - bbox.height) < 1.0
+        plt.close(fig)
+
+    def test_position_plot_wide_pc_matches_standard_canvas(
+        self, mock_config, sample_dataframe, tmp_path
+    ):
+        """Wide and standard position JPGs use the same output canvas."""
+        mock_config.plot_dir = str(tmp_path)
+        (tmp_path / "jpg").mkdir()
+        vis = SingleStarVisualizer(mock_config)
+
+        vis.create_position_plot_jpg(sample_dataframe, "test_sim")
+        vis.create_position_plot_wide_pc_jpg(sample_dataframe, "test_sim")
+
+        standard_path = tmp_path / "jpg" / "test_output_ttot_1.0_x1_vs_x2.jpg"
+        wide_path = tmp_path / "jpg" / "test_output_ttot_1.0_x1_vs_x2_wide_pc.jpg"
+        assert plt.imread(standard_path).shape[:2] == plt.imread(wide_path).shape[:2]
+
+    def test_highlight_position_plot_wide_pc_matches_standard_canvas(
+        self, mock_config, sample_dataframe, tmp_path
+    ):
+        """Highlighted wide and standard position JPGs use the same output canvas."""
+        mock_config.plot_dir = str(tmp_path)
+        (tmp_path / "jpg").mkdir()
+        vis = SingleStarVisualizer(mock_config)
+
+        vis.create_position_plot_hightlight_compact_objects_jpg(sample_dataframe, "test_sim")
+        vis.create_position_plot_hightlight_compact_objects_wide_pc_jpg(
+            sample_dataframe, "test_sim"
+        )
+
+        standard_path = (
+            tmp_path / "jpg" / "test_output_ttot_1.0_x1_vs_x2_highlight_compact_objects.jpg"
+        )
+        wide_path = (
+            tmp_path / "jpg" / "test_output_ttot_1.0_x1_vs_x2_highlight_compact_objects_wide_pc.jpg"
+        )
+        assert plt.imread(standard_path).shape[:2] == plt.imread(wide_path).shape[:2]
+
     @patch("os.path.exists", return_value=False)
     @patch("os.makedirs")
     @patch("matplotlib.pyplot.close")

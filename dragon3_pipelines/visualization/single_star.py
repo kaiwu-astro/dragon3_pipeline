@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 class SingleStarVisualizer(BaseHDF5Visualizer):
     """Visualizer for single star data"""
 
+    def _save_position_figure(self, fig: plt.Figure, ax: plt.Axes, save_jpg_path: str) -> None:
+        """Save position plots with fixed canvas size and square data axes."""
+        ax.set_aspect("equal", adjustable="box")
+        fig.subplots_adjust(left=0.18, right=0.96, bottom=0.18, top=0.82)
+        with mpl.rc_context({"savefig.bbox": None}):
+            fig.savefig(save_jpg_path, transparent=False)
+
     def purge(
         self,
         target: str,
@@ -120,8 +127,16 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             size = 10
             color = "white"
         with plt.style.context("dark_background"):
+            fig, ax = plt.subplots()
             ax = sns.scatterplot(
-                data=single_df_at_t, x="X [pc]", y="Y [pc]", marker=".", lw=0, s=size, color=color
+                data=single_df_at_t,
+                x="X [pc]",
+                y="Y [pc]",
+                marker=".",
+                lw=0,
+                s=size,
+                color=color,
+                ax=ax,
             )
             if extra_ax_handler is not None:
                 extra_ax_handler(ax)
@@ -140,13 +155,13 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             )
             if custom_ax_decorator is not None:
                 custom_ax_decorator(ax)
-            ax.figure.savefig(save_jpg_path, transparent=False)
+            self._save_position_figure(fig, ax, save_jpg_path)
             try:
                 __IPYTHON__
                 if self.config.close_figure_in_ipython:
-                    plt.close(ax.figure)
+                    plt.close(fig)
             except NameError:
-                plt.close(ax.figure)
+                plt.close(fig)
 
     @log_time(logger)
     def create_position_plot_wide_pc_jpg(
@@ -265,7 +280,7 @@ class SingleStarVisualizer(BaseHDF5Visualizer):
             custom_ax_decorator(ax)
 
         add_grid(ax)
-        fig.savefig(save_jpg_path, transparent=False)
+        self._save_position_figure(fig, ax, save_jpg_path)
         try:
             __IPYTHON__
             if self.config.close_figure_in_ipython:
