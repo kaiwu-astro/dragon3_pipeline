@@ -2,6 +2,8 @@
 Tests for dragon3_pipelines.config module
 """
 
+from pathlib import Path
+
 import yaml
 
 from dragon3_pipelines.config import ConfigManager, load_config
@@ -75,7 +77,11 @@ class TestConfigManager:
     def test_default_analysis_cache_paths(self):
         """Test default analysis cache root and derived feature directories."""
         config = ConfigManager()
-        root = "/p/home/jusers/wu13/juwels/scratch/dragon3_pipelines_cache"
+        default_config_path = (
+            Path(__file__).parents[1] / "dragon3_pipelines" / "config" / "default_config.yaml"
+        )
+        with open(default_config_path) as f:
+            root = yaml.safe_load(f)["paths"]["analysis_cache_dir"]
 
         assert config.analysis_cache_dir == root
         assert config.analysis_cache_dir_of["0sb"] == f"{root}/0sb"
