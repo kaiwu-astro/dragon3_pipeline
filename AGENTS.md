@@ -295,15 +295,42 @@ with ctx.Pool(processes=config.processes_count) as pool:
 
 ### 缓存机制
 
-**Feather 格式缓存：**
-使用 Apache Arrow Feather 格式缓存 DataFrame，速度快且保留类型信息：
+**Analysis 结果缓存：**
+analysis/data-reduction 产生的中间结果缓存统一放在 `paths.analysis_cache_dir` 下，目录结构固定为：
+
+```text
+<analysis_cache_dir>/<simu_name>/<feature>/...
+```
+
+其中 feature 目录名使用稳定的小写 snake_case，不使用展示标签。当前约定的 feature 名包括：
+
+- `particle_df`
+- `primordial_binary`
+- `b_type_binary`
+- `binary_stellar_type`
+- `current_lagrangian`
+
+代码中不要手写拼接这些目录；应使用 `dragon3_pipelines.analysis.cache_paths.analysis_cache_dir(config, simu_name, feature)` 以及该模块中定义的 feature 常量。`ConfigManager` 会派生：
+
+- `config.analysis_cache_dir_of[simu_name] == <analysis_cache_dir>/<simu_name>`
+- `config.particle_df_cache_dir_of[simu_name] == <analysis_cache_dir>/<simu_name>/particle_df`
+
+`particle_df_cache_dir_of` 仅作为粒子追踪缓存目录兼容属性保留；新代码不要把其他 analysis 缓存手动挂在它下面。`paths.cache_dir_suffix` 已弃用，仅用于兼容缺少 `analysis_cache_dir` 的旧用户配置；新配置必须使用 `paths.analysis_cache_dir`。
+
+**HDF5 I/O 加速缓存：**
+`.h5part.*.df.feather` 这类从 HDF5 table 派生的 Feather 缓存属于文件读取加速缓存，应继续放在对应 `.h5part` 文件旁边，不纳入 `analysis_cache_dir`。
+
+**典型 Feather 缓存模式：**
+使用 Apache Arrow Feather 格式缓存 DataFrame，速度快且保留类型信息。保存 analysis 结果时，先通过缓存路径 helper 得到 feature 目录：
 
 ```python
 import pandas as pd
-from pathlib import Path
+
+from dragon3_pipelines.analysis.cache_paths import PARTICLE_DF_FEATURE, analysis_cache_dir
 
 # 保存缓存
-cache_path = Path(config.cache_dir) / "particle_data.feather"
+cache_path = analysis_cache_dir(config, simu_name, PARTICLE_DF_FEATURE) / "particle_data.feather"
+cache_path.parent.mkdir(parents=True, exist_ok=True)
 df.to_feather(cache_path)
 
 # 读取缓存
@@ -313,6 +340,8 @@ if cache_path.exists():
 
 **典型缓存模式：**
 ```python
+from pathlib import Path
+
 def get_data_with_cache(cache_path: Path) -> pd.DataFrame:
     """带缓存的数据读取"""
     if cache_path.exists():
