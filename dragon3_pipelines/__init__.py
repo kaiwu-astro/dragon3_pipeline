@@ -8,7 +8,11 @@ __version__ = "0.1.0"
 
 if TYPE_CHECKING:
     from dragon3_pipelines.__main__ import SimulationPlotter, main
-    from dragon3_pipelines.analysis import BinaryStellarTypeExtractor, PrimordialBinaryIdentifier
+    from dragon3_pipelines.analysis import (
+        BTypeBinaryExtractor,
+        BinaryStellarTypeExtractor,
+        PrimordialBinaryIdentifier,
+    )
 
 
 def __getattr__(name: str) -> Any:
@@ -19,13 +23,15 @@ def __getattr__(name: str) -> Any:
         exported = {"main": main, "SimulationPlotter": SimulationPlotter}
         globals().update(exported)
         return exported[name]
-    if name in {"BinaryStellarTypeExtractor", "PrimordialBinaryIdentifier"}:
+    if name in {"BTypeBinaryExtractor", "BinaryStellarTypeExtractor", "PrimordialBinaryIdentifier"}:
         from dragon3_pipelines.analysis import (
+            BTypeBinaryExtractor,
             BinaryStellarTypeExtractor,
             PrimordialBinaryIdentifier,
         )
 
         exported = {
+            "BTypeBinaryExtractor": BTypeBinaryExtractor,
             "BinaryStellarTypeExtractor": BinaryStellarTypeExtractor,
             "PrimordialBinaryIdentifier": PrimordialBinaryIdentifier,
         }
@@ -39,6 +45,7 @@ __all__ = [
     "__version__",
     "main",
     "SimulationPlotter",
+    "BTypeBinaryExtractor",
     "BinaryStellarTypeExtractor",
     "PrimordialBinaryIdentifier",
 ]

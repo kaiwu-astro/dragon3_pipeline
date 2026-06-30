@@ -52,6 +52,20 @@ ns_binaries = extractor.load_binaries_with_stellar_type("20sb", kw="13")
 
 Specify exactly one of `stellar_type` or `kw`. StellarType abbreviations are matched case-insensitively using `default_config.yaml` `stellar_types`.
 
+### `dragon3_pipelines.analysis.BTypeBinaryExtractor`
+
+Extract complete processed binary rows where either component satisfies the project B-type main-sequence criteria: `Bin KW* == 1`, `10500 <= Bin Teff* <= 31500`, and `2.75 <= Bin M* <= 17.7`.
+
+```python
+from dragon3_pipelines.analysis import BTypeBinaryExtractor
+from dragon3_pipelines.config import ConfigManager
+
+config = ConfigManager()
+df = BTypeBinaryExtractor(config).load_b_type_binaries("20sb")
+```
+
+The returned table preserves the processed binary rows and adds `b_type_member1`, `b_type_member2`, `b_type_member_count`, `b_type_pair_key`, and `is_primordial_binary`. Results are cached separately under the simulation particle cache directory.
+
 ### `dragon3_pipelines.analysis.tau_gw`
 
 Calculate gravitational wave merger timescales.

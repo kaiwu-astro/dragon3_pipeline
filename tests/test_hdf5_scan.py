@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pandas as pd
 import pytest
 
+from dragon3_pipelines.analysis.b_type_binary import BTypeBinaryExtractor
 from dragon3_pipelines.analysis.binary_stellar_type import BinaryStellarTypeExtractor
 from dragon3_pipelines.analysis.primordial_binary import PrimordialBinaryIdentifier
 from dragon3_pipelines.analysis.hdf5_scan import HDF5ScanOptions, HDF5ScanRunner
@@ -377,3 +378,108 @@ def test_primordial_identifier_fails_when_zero_ttot_snapshot_missing(tmp_path: P
 
     with pytest.raises(ValueError, match="TTOT == 0.0"):
         identifier.load_primordial_binaries("sim", wait_age_hour=0)
+
+
+def test_b_type_extractor_filters_members_marks_primordial_and_writes_meta(
+    tmp_path: Path,
+) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_1.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame(
+        {
+            "Bin KW1": [2, 2, 1, 2, 1, 2, 1, 1, 2],
+            "Bin KW2": [2, 2, 2, 1, 1, 1, 2, 2, 2],
+            "Bin Teff1*": [9000, 9000, 10500, 9000, 20000, 20000, 10499, 20000, 20000],
+            "Bin Teff2*": [9000, 9000, 9000, 31500, 20000, 20000, 20000, 20000, 20000],
+            "Bin M1*": [1.0, 1.0, 2.75, 1.0, 10.0, 10.0, 10.0, 200.0, 10.0],
+            "Bin M2*": [1.0, 1.0, 1.0, 17.7, 10.0, 2.74, 10.0, 10.0, 10.0],
+            "TTOT": [0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            "Time[Myr]": [0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0],
+            "Bin Name1": [1, 9, 2, 30, 10, 50, 60, 70, 80],
+            "Bin Name2": [2, 10, 1, 31, 9, 51, 61, 71, 81],
+            "extra_processed_column": [
+                "primordial-a",
+                "primordial-b",
+                "member1-lower-boundary",
+                "member2-upper-boundary",
+                "both-members",
+                "drop-mass-low",
+                "drop-teff-low",
+                "drop-mass-high",
+                "drop-kw",
+            ],
+        }
+    )
+    extractor = BTypeBinaryExtractor(config)
+    fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
+    extractor.hdf5_file_processor = fake_processor
+
+    result = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+
+    assert result["extra_processed_column"].tolist() == [
+        "member1-lower-boundary",
+        "both-members",
+        "member2-upper-boundary",
+    ]
+    assert result["b_type_member1"].tolist() == [True, True, False]
+    assert result["b_type_member2"].tolist() == [False, True, True]
+    assert result["b_type_member_count"].tolist() == [1, 2, 1]
+    assert result["b_type_pair_key"].tolist() == ["1-2", "9-10", "30-31"]
+    assert result["is_primordial_binary"].tolist() == [True, True, False]
+    assert "extra_processed_column" in result.columns
+
+    cache_path = tmp_path / "cache" / "b_type_binary" / "b_type_binaries_until_1.000000.feather"
+    meta_path = cache_path.with_name(cache_path.stem + ".meta.json")
+    assert cache_path.exists()
+    meta = json.loads(meta_path.read_text())
+    assert meta["schema_version"] == 1
+    assert meta["b_type_criteria"] == {
+        "kw": 1,
+        "teff_min": 10500,
+        "teff_max": 31500,
+        "mass_min": 2.75,
+        "mass_max": 17.7,
+    }
+    assert meta["primordial_signature"]["meta"]["row_count"] == 2
+    assert meta["processed_files"][str(hdf5_path)]["ttot"] == [0.0, 1.0]
+
+    result_again = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    assert fake_processor.read_count == 2
+    pd.testing.assert_frame_equal(result, result_again)
+
+
+def test_b_type_extractor_refreshes_when_primordial_cache_changes(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = tmp_path / "snap.40_1.0.h5part"
+    hdf5_path.write_text("fake")
+    binaries = pd.DataFrame(
+        {
+            "Bin KW1": [2, 1],
+            "Bin KW2": [2, 2],
+            "Bin Teff1*": [9000, 20000],
+            "Bin Teff2*": [9000, 9000],
+            "Bin M1*": [1.0, 5.0],
+            "Bin M2*": [1.0, 1.0],
+            "TTOT": [0.0, 1.0],
+            "Bin Name1": [1, 2],
+            "Bin Name2": [2, 1],
+        }
+    )
+    extractor = BTypeBinaryExtractor(config)
+    fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
+    extractor.hdf5_file_processor = fake_processor
+
+    first = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    assert first["is_primordial_binary"].tolist() == [True]
+    assert fake_processor.read_count == 2
+
+    primordial_meta = tmp_path / "cache" / "primordial_binary" / "primordial_binaries.meta.json"
+    meta = json.loads(primordial_meta.read_text())
+    meta["row_count"] = 0
+    primordial_meta.write_text(json.dumps(meta, indent=2, sort_keys=True))
+
+    second = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+
+    assert fake_processor.read_count == 3
+    assert second["is_primordial_binary"].tolist() == [True]
