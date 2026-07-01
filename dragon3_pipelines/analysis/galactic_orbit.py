@@ -40,11 +40,6 @@ class GalacticOrbitProcessor(ScanBackedAnalysisBase):
     def _galactic_orbit_config(self) -> Dict[str, Any]:
         defaults = {
             "enabled": True,
-            "sample_every_nb_time": 1.0,
-            "wait_age_hour": 24,
-            "use_hdf5_cache": True,
-            "parallel": False,
-            "processes": None,
             "cache_filename": "galactic_orbit.feather",
             "time_color_max_myr": 500.0,
         }
@@ -53,17 +48,7 @@ class GalacticOrbitProcessor(ScanBackedAnalysisBase):
 
     def build_scan_job(self, simu_name: str, *, force: bool = False) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
-        orbit_config = self._galactic_orbit_config()
-        options = self._scan_options(
-            defaults={
-                "sample_every_nb_time": orbit_config["sample_every_nb_time"],
-                "wait_age_hour": orbit_config["wait_age_hour"],
-                "use_hdf5_cache": orbit_config["use_hdf5_cache"],
-                "parallel": orbit_config["parallel"],
-                "processes": orbit_config["processes"],
-            },
-            force=force,
-        )
+        options = self._scan_options(force=force)
         task = GalacticOrbitTask(self, simu_name)
         return HDF5ScanJob(simu_name, task, options)
 

@@ -4,7 +4,7 @@ Dragon3 Pipelines - N-body simulation data analysis and visualization toolkit
 
 from typing import TYPE_CHECKING, Any
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 if TYPE_CHECKING:
     from dragon3_pipelines.__main__ import SimulationPlotter, main

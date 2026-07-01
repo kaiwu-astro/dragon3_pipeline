@@ -417,6 +417,8 @@ HDF5 文件中的可绘图信息大体分为两类，维护时应先判断属于
 
 未来凡是“遍历 HDF5 文件抽取小型信息”的 analysis/data-reduction 功能，优先实现为 `HDF5ScanTask` 并通过 `HDF5ScanRunner` 执行。对应的外层 analysis class 应继承 `ScanBackedAnalysisBase`，实现很薄的 `build_scan_job()`；具体数据提取、merge、cache path、meta 语义仍放在独立 task 中。不要复制新的 HDF5 遍历循环，也不要把这类缓存写入逻辑塞进绘图主循环；`SimulationPlotter.plot_hdf5_file` 应保持绘图调度职责。
 
+所有 HDF5 文件选择、table cache、scan 并行和时间采样配置集中在全局 `hdf5` 配置节。feature 配置（如 `current_lagrangian`、`galactic_orbit`、`binary_stellar_type_extraction`）只保留 `enabled`、缓存文件名和绘图参数等专属字段。`hdf5.file_selection.sample_every_nb_time` 同时控制 scan 和主 HDF5 绘图；`None` 或 `<= 0` 表示不采样，正数表示保留从 `0.0` 开始落在该 NB 时间间隔倍数上的 snapshot。
+
 当同一 simulation 下需要同时运行多个 HDF5 scan task 时，优先通过 `HDF5ScanSession` 堆积 job 后统一 `run()`，让相同 scan options 的任务共享 HDF5 文件读取。默认尾部增量策略会信任已处理尾部之前的旧文件；旧 HDF5 文件被手动改写时应使用 `force=True` 或删除对应 analysis cache 后重建。
 
 ### ❌ 其他禁止事项

@@ -31,22 +31,12 @@ class BTypeBinaryExtractor(ScanBackedAnalysisBase):
         simu_name: str,
         *,
         update: bool = True,
-        sample_every_nb_time: float | None = None,
-        wait_age_hour: int | float | None = None,
-        use_hdf5_cache: bool | None = None,
-        parallel: bool | None = None,
-        processes: int | None = None,
         force: bool = False,
     ) -> pd.DataFrame:
         """Return complete processed binary rows containing B-type main-sequence members."""
         job = self.build_scan_job(
             simu_name,
             update=update,
-            sample_every_nb_time=sample_every_nb_time,
-            wait_age_hour=wait_age_hour,
-            use_hdf5_cache=use_hdf5_cache,
-            parallel=parallel,
-            processes=processes,
             force=force,
         )
         return self._load_or_update_scan_job(job, update=update)
@@ -56,32 +46,10 @@ class BTypeBinaryExtractor(ScanBackedAnalysisBase):
         simu_name: str,
         *,
         update: bool = True,
-        sample_every_nb_time: float | None = None,
-        wait_age_hour: int | float | None = None,
-        use_hdf5_cache: bool | None = None,
-        parallel: bool | None = None,
-        processes: int | None = None,
         force: bool = False,
     ) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
-        config = self._extraction_config()
-        options = self._scan_options(
-            defaults={
-                "sample_every_nb_time": config["sample_every_nb_time"],
-                "wait_age_hour": config["wait_age_hour"],
-                "use_hdf5_cache": config["use_hdf5_cache"],
-                "parallel": config["parallel"],
-                "processes": config["processes"],
-            },
-            overrides={
-                "sample_every_nb_time": sample_every_nb_time,
-                "wait_age_hour": wait_age_hour,
-                "use_hdf5_cache": use_hdf5_cache,
-                "parallel": parallel,
-                "processes": processes,
-            },
-            force=force,
-        )
+        options = self._scan_options(force=force)
 
         primordial = self._load_primordial_binaries(
             simu_name,
@@ -140,13 +108,7 @@ class BTypeBinaryExtractor(ScanBackedAnalysisBase):
         return set()
 
     def _extraction_config(self) -> Dict[str, Any]:
-        defaults = {
-            "sample_every_nb_time": 1.0,
-            "wait_age_hour": 24,
-            "use_hdf5_cache": True,
-            "parallel": False,
-            "processes": None,
-        }
+        defaults = {}
         user_config = getattr(self.config, "binary_stellar_type_extraction", {}) or {}
         return {**defaults, **user_config}
 

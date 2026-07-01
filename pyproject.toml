@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dragon3_pipelines"
-version = "0.1.0"
+version = "1.0.0"
 description = "Pipelines for Dragon3 N-body simulation data analysis and visualization"
 readme = "README.md"
 requires-python = ">=3.11"

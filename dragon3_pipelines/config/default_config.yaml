@@ -32,12 +32,23 @@ processing:
     "20sb": "last"
     "60sb": "last"
   skip_existing_plot: true
-  plot_only_int_nbody_time: true
   close_figure_in_ipython: false
   processes_count: 40
   tasks_per_child: 3
   mem_max_gb: 40.0
   inode_limit: 2000000
+
+# Global HDF5 file selection, table-cache, and scan options
+hdf5:
+  file_selection:
+    wait_age_hour: 24
+    sample_every_nb_time: 1.0
+    exclude_bad_dirname: true
+  table_cache:
+    use_hdf5_cache: true
+  scan:
+    parallel: false
+    incremental_from_cache_tail: true
 
 # Lagrangian radii percentages to plot
 selected_lagr_percent:
@@ -52,28 +63,16 @@ selected_lagr_percent:
 # Current-mass Lagrangian radii built from HDF5 snapshots
 current_lagrangian:
   enabled: true
-  sample_every_nb_time: 1.0
-  wait_age_hour: 24
   cache_filename: "current_mass_lagr.feather"
 
 # Cluster orbit in the host galaxy built from scalar HDF5 snapshots
 galactic_orbit:
   enabled: true
-  sample_every_nb_time: 1.0
-  wait_age_hour: 24
-  use_hdf5_cache: true
-  parallel: false
-  processes: null
   cache_filename: "galactic_orbit.feather"
   time_color_max_myr: 500.0
 
 # Binary rows containing a requested stellar type, built from HDF5 snapshots
 binary_stellar_type_extraction:
-  sample_every_nb_time: 1.0
-  wait_age_hour: 24
-  use_hdf5_cache: true
-  parallel: false
-  processes: null
   cache_filename_template: "binaries_with_{target}_until_{last_ttot:.6f}.feather"
 
 # Physical constants and thresholds

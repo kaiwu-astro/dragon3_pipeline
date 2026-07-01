@@ -5,7 +5,7 @@ import os
 import time
 import warnings
 from glob import glob
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +17,7 @@ import astropy.units as u
 from dragon3_pipelines.utils import log_time
 
 logger = logging.getLogger(__name__)
+_CONFIG_DEFAULT = object()
 
 
 class HDF5FileProcessor:
@@ -660,9 +661,9 @@ class HDF5FileProcessor:
     def get_all_hdf5_paths(
         self,
         simu_name: str,
-        wait_age_hour: int = 24,
-        sample_every_nb_time: Optional[float] = 1.0,
-        exclude_bad_dirname=True,
+        wait_age_hour: Optional[int | float] = None,
+        sample_every_nb_time: Optional[float] | Any = _CONFIG_DEFAULT,
+        exclude_bad_dirname: Optional[bool] = None,
     ) -> List[str]:
         """
         Get all HDF5 file paths for a simulation, sorted by time
@@ -676,6 +677,15 @@ class HDF5FileProcessor:
         Returns:
             List of HDF5 file paths sorted by time, excluding files younger than wait_age_hour
         """
+        hdf5_config = getattr(self.config, "hdf5", {}) or {}
+        file_selection = hdf5_config.get("file_selection", {})
+        if wait_age_hour is None:
+            wait_age_hour = file_selection.get("wait_age_hour", 24)
+        if sample_every_nb_time is _CONFIG_DEFAULT:
+            sample_every_nb_time = file_selection.get("sample_every_nb_time", 1.0)
+        if exclude_bad_dirname is None:
+            exclude_bad_dirname = file_selection.get("exclude_bad_dirname", True)
+
         hdf5_files = sorted(
             glob(self.config.pathof[simu_name] + "/**/*.h5part", recursive=True),
             key=lambda fn: self.get_hdf5_file_time_from_filename(fn),
@@ -698,13 +708,9 @@ class HDF5FileProcessor:
         )
         if sample_every_nb_time is None or sample_every_nb_time <= 0:
             return hdf5_files
-
-        targets = np.arange(times[0], times[-1] + sample_every_nb_time, sample_every_nb_time)
-        indices = np.searchsorted(
-            times, targets, side="left"
-        )  # note: 无需因可能倒带重复跑而去重，因为这一步自带去重，只会留一个
-        indices = indices[indices < len(times)]
-        unique_indices = np.unique(indices)
+        ratios = times / sample_every_nb_time
+        keep_mask = np.isclose(ratios, np.round(ratios), rtol=0.0, atol=1e-9)
+        unique_indices = np.flatnonzero(keep_mask)
 
         # 检查文件列表中是否漏了：检查文件名时间戳的实际间隔是否严格为 sample_every_nb_time ，否则输出遗漏的时间点
         actual_times = times[unique_indices]

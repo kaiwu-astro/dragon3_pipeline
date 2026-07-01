@@ -72,26 +72,11 @@ class CompactBinaryCounter(ScanBackedAnalysisBase):
         self,
         simu_name: str,
         *,
-        sample_every_nb_time: float = 1.0,
-        wait_age_hour: int = 24,
-        exclude_bad_dirname: bool = True,
-        use_hdf5_cache: bool = True,
         update: bool = True,
-        parallel: bool = False,
-        processes: int | None = None,
         force: bool = False,
     ) -> Dict[str, Any]:
         """Summarize unique compact binary systems seen from available snapshots."""
-        job = self.build_scan_job(
-            simu_name,
-            sample_every_nb_time=sample_every_nb_time,
-            wait_age_hour=wait_age_hour,
-            exclude_bad_dirname=exclude_bad_dirname,
-            use_hdf5_cache=use_hdf5_cache,
-            parallel=parallel,
-            processes=processes,
-            force=force,
-        )
+        job = self.build_scan_job(simu_name, force=force)
         task = job.task
         cache_df = self._load_or_update_scan_job(job, update=update)
         return self._summary_from_cache(cache_df, task.read_meta())
@@ -100,26 +85,10 @@ class CompactBinaryCounter(ScanBackedAnalysisBase):
         self,
         simu_name: str,
         *,
-        sample_every_nb_time: float = 1.0,
-        wait_age_hour: int | float = 24,
-        exclude_bad_dirname: bool = True,
-        use_hdf5_cache: bool = True,
-        parallel: bool = False,
-        processes: int | None = None,
         force: bool = False,
     ) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
-        options = self._scan_options(
-            overrides={
-                "sample_every_nb_time": sample_every_nb_time,
-                "wait_age_hour": wait_age_hour,
-                "use_hdf5_cache": use_hdf5_cache,
-                "parallel": parallel,
-                "processes": processes,
-                "exclude_bad_dirname": exclude_bad_dirname,
-            },
-            force=force,
-        )
+        options = self._scan_options(force=force)
         task = CompactBinaryCountTask(self, simu_name)
         return HDF5ScanJob(simu_name, task, options)
 

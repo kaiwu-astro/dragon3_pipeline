@@ -58,8 +58,6 @@ class CurrentMassLagrangianProcessor(ScanBackedAnalysisBase):
     def _current_lagrangian_config(self) -> Dict[str, Any]:
         defaults = {
             "enabled": True,
-            "sample_every_nb_time": 1.0,
-            "wait_age_hour": 24,
             "cache_filename": "current_mass_lagr.feather",
         }
         user_config = getattr(self.config, "current_lagrangian", {}) or {}
@@ -105,11 +103,8 @@ class CurrentMassLagrangianProcessor(ScanBackedAnalysisBase):
         df.to_feather(tmp_cache_path)
         os.replace(tmp_cache_path, cache_path)
 
-        current_config = self._current_lagrangian_config()
         meta = {
             "schema_version": self.SCHEMA_VERSION,
-            "sample_every_nb_time": current_config["sample_every_nb_time"],
-            "wait_age_hour": current_config["wait_age_hour"],
             "statistics": "current-mass weighted, singles table only",
             "percentages": self.percentages,
             "processed_files": processed_files,
@@ -140,17 +135,7 @@ class CurrentMassLagrangianProcessor(ScanBackedAnalysisBase):
 
     def build_scan_job(self, simu_name: str, *, force: bool = False) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
-        current_config = self._current_lagrangian_config()
-        options = self._scan_options(
-            defaults={
-                "sample_every_nb_time": current_config["sample_every_nb_time"],
-                "wait_age_hour": current_config["wait_age_hour"],
-                "use_hdf5_cache": current_config.get("use_hdf5_cache", True),
-                "parallel": current_config.get("parallel", False),
-                "processes": current_config.get("processes"),
-            },
-            force=force,
-        )
+        options = self._scan_options(force=force)
         task = CurrentMassLagrangianTask(self, simu_name)
         return HDF5ScanJob(simu_name, task, options)
 
@@ -492,15 +477,11 @@ class CurrentMassLagrangianTask(FeatherMetaCacheMixin):
         processed_files: Dict[str, Dict[str, Any]],
         options: HDF5ScanOptions,
     ) -> Dict[str, Any]:
-        current_config = self.processor._current_lagrangian_config()
-        return {
-            "schema_version": self.schema_version,
-            "sample_every_nb_time": current_config["sample_every_nb_time"],
-            "wait_age_hour": current_config["wait_age_hour"],
-            "use_hdf5_cache": current_config.get("use_hdf5_cache", True),
-            "parallel": current_config.get("parallel", False),
-            "processes": current_config.get("processes"),
-            "statistics": "current-mass weighted, singles table only",
-            "percentages": self.processor.percentages,
-            "processed_files": processed_files,
-        }
+        meta = super().build_meta(cache_df, processed_files, options)
+        meta.update(
+            {
+                "statistics": "current-mass weighted, singles table only",
+                "percentages": self.processor.percentages,
+            }
+        )
+        return meta

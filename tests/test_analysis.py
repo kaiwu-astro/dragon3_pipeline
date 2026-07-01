@@ -570,10 +570,16 @@ class TestCurrentMassLagrangianProcessor:
         config.pathof = {"test_simu": str(tmp_path)}
         config.current_lagrangian = {
             "enabled": True,
-            "sample_every_nb_time": 1.0,
-            "wait_age_hour": 0,
-            "use_hdf5_cache": True,
             "cache_filename": "current_mass_lagr.feather",
+        }
+        config.hdf5 = {
+            "file_selection": {
+                "wait_age_hour": 0,
+                "sample_every_nb_time": 1.0,
+                "exclude_bad_dirname": True,
+            },
+            "table_cache": {"use_hdf5_cache": True},
+            "scan": {"parallel": False, "incremental_from_cache_tail": True},
         }
         return config
 
@@ -654,6 +660,7 @@ class TestCurrentMassLagrangianProcessor:
         ).exists()
 
     def test_update_can_insert_intermediate_time(self, mock_config, tmp_path):
+        mock_config.hdf5["file_selection"]["sample_every_nb_time"] = 0.5
         processor = CurrentMassLagrangianProcessor(mock_config)
         paths = [tmp_path / "snap.40_1.0.h5part", tmp_path / "snap.40_0.5.h5part"]
         for path in paths:
@@ -732,6 +739,16 @@ class TestCompactBinaryCounter:
         config.pathof = {"test_simu": str(tmp_path)}
         config.input_file_path_of = {"test_simu": str(tmp_path / "input.inp")}
         config.processes_count = 1
+        config.tasks_per_child = 1
+        config.hdf5 = {
+            "file_selection": {
+                "wait_age_hour": 3,
+                "sample_every_nb_time": 0,
+                "exclude_bad_dirname": False,
+            },
+            "table_cache": {"use_hdf5_cache": False},
+            "scan": {"parallel": False, "incremental_from_cache_tail": True},
+        }
         config.compact_object_KW = np.array([10, 11, 12, 13, 14])
         config.kw_to_stellar_type = {
             0: "MS",
@@ -814,13 +831,7 @@ class TestCompactBinaryCounter:
             return_value={"scalars": scalars, "binaries": binaries}
         )
 
-        result = counter.summarize_simulation(
-            "test_simu",
-            sample_every_nb_time=0,
-            wait_age_hour=3,
-            exclude_bad_dirname=False,
-            use_hdf5_cache=False,
-        )
+        result = counter.summarize_simulation("test_simu")
 
         counter.hdf5_file_processor.get_all_hdf5_paths.assert_called_once_with(
             "test_simu",
@@ -903,15 +914,20 @@ class TestGalacticOrbitProcessor:
         }
         config.pathof = {"test_simu": str(tmp_path)}
         config.processes_count = 1
+        config.tasks_per_child = 1
         config.galactic_orbit = {
             "enabled": True,
-            "sample_every_nb_time": 1.0,
-            "wait_age_hour": 0,
-            "use_hdf5_cache": True,
-            "parallel": False,
-            "processes": None,
             "cache_filename": "galactic_orbit.feather",
             "time_color_max_myr": 500.0,
+        }
+        config.hdf5 = {
+            "file_selection": {
+                "wait_age_hour": 0,
+                "sample_every_nb_time": 1.0,
+                "exclude_bad_dirname": True,
+            },
+            "table_cache": {"use_hdf5_cache": True},
+            "scan": {"parallel": False, "incremental_from_cache_tail": True},
         }
         return config
 
@@ -929,7 +945,7 @@ class TestGalacticOrbitProcessor:
             }
         ).set_index("TTOT", drop=False)
 
-    def test_update_caches_every_scalar_row_and_skips_fresh_files(self, mock_config, tmp_path):
+    def test_update_caches_sampled_scalar_rows_and_skips_fresh_files(self, mock_config, tmp_path):
         processor = GalacticOrbitProcessor(mock_config)
         hdf5_path = tmp_path / "snap.40_1.0.h5part"
         hdf5_path.touch()
@@ -942,10 +958,11 @@ class TestGalacticOrbitProcessor:
         first = processor.update("test_simu")
         second = processor.update("test_simu")
 
-        assert len(first) == 3
-        assert len(second) == 3
+        assert len(first) == 2
+        assert len(second) == 2
         assert processor.hdf5_file_processor.read_tables.call_count == 1
-        assert list(first["source_row_index"]) == [0, 1, 2]
+        assert first["TTOT"].tolist() == [1.0, 2.0]
+        assert list(first["source_row_index"]) == [0, 1]
         cache_path = tmp_path / "cache" / "test_simu" / "galactic_orbit" / "galactic_orbit.feather"
         assert cache_path.exists()
         assert cache_path.with_name("galactic_orbit.meta.json").exists()

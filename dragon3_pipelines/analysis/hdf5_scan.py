@@ -13,7 +13,7 @@ import logging
 import multiprocessing
 import os
 from collections import defaultdict
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Protocol, Sequence
 
@@ -33,7 +33,6 @@ class HDF5ScanOptions:
     wait_age_hour: int | float = 24
     use_hdf5_cache: bool = True
     parallel: bool = False
-    processes: int | None = None
     exclude_bad_dirname: bool = True
     force: bool = False
     incremental_from_cache_tail: bool = True
@@ -46,6 +45,33 @@ class HDF5ScanJob:
     simu_name: str
     task: HDF5ScanTask
     options: HDF5ScanOptions
+
+
+def hdf5_scan_options_from_config(config: Any, *, force: bool = False) -> HDF5ScanOptions:
+    """Build scan options from the global ``hdf5`` configuration section."""
+    hdf5_config = getattr(config, "hdf5", {}) or {}
+    if not isinstance(hdf5_config, dict):
+        hdf5_config = {}
+    file_selection = hdf5_config.get("file_selection", {})
+    table_cache = hdf5_config.get("table_cache", {})
+    scan = hdf5_config.get("scan", {})
+    return HDF5ScanOptions(
+        sample_every_nb_time=file_selection.get("sample_every_nb_time", 1.0),
+        wait_age_hour=file_selection.get("wait_age_hour", 24),
+        exclude_bad_dirname=file_selection.get("exclude_bad_dirname", True),
+        use_hdf5_cache=table_cache.get("use_hdf5_cache", True),
+        parallel=scan.get("parallel", False),
+        incremental_from_cache_tail=scan.get("incremental_from_cache_tail", True),
+        force=force,
+    )
+
+
+def ttot_matches_sample(ttot: float, sample_every_nb_time: float | None) -> bool:
+    """Return whether ``ttot`` lies on the global NB-time sample grid."""
+    if sample_every_nb_time is None or sample_every_nb_time <= 0:
+        return True
+    ratio = float(ttot) / float(sample_every_nb_time)
+    return bool(np.isclose(ratio, round(ratio), rtol=0.0, atol=1e-9))
 
 
 class HDF5ScanTask(Protocol):
@@ -119,12 +145,14 @@ class HDF5ScanRunner:
         )
 
         for task in tasks:
-            if options.force:
+            meta = task.read_meta()
+            meta_options = meta.get("scan_options") if isinstance(meta, dict) else None
+            options_changed = bool(meta) and meta_options != persistent_scan_options(options)
+            if options.force or options_changed:
                 cache_df = pd.DataFrame()
                 meta: Dict[str, Any] = {}
             else:
                 cache_df = task.finalize_cache(task.read_cache())
-                meta = task.read_meta()
             states[task.name] = {
                 "cache_df": cache_df,
                 "meta": meta,
@@ -199,13 +227,14 @@ class HDF5ScanRunner:
         states: Mapping[str, Dict[str, Any]],
         options: HDF5ScanOptions,
     ) -> list[Dict[str, Any]]:
-        processes = options.processes or getattr(self.config, "processes_count", None)
+        processes = getattr(self.config, "processes_count", None)
+        maxtasksperchild = getattr(self.config, "tasks_per_child", None)
         ctx = multiprocessing.get_context("forkserver")
         args = [
             (self.config, simu_name, hdf5_path, file_tasks, states, options)
             for hdf5_path, file_tasks in work_items
         ]
-        with ctx.Pool(processes=processes) as pool:
+        with ctx.Pool(processes=processes, maxtasksperchild=maxtasksperchild) as pool:
             return pool.map(_run_file_tasks_worker, args)
 
     def _run_file_tasks(
@@ -225,6 +254,7 @@ class HDF5ScanRunner:
             columns_by_table=columns_by_table,
             use_cache=options.use_hdf5_cache,
         )
+        df_dict = _filter_df_dict_by_sample(df_dict, options.sample_every_nb_time)
         task_results = {}
         for task in file_tasks:
             state = states[task.name]
@@ -255,30 +285,9 @@ class ScanBackedAnalysisBase:
             return job.task.finalize_cache(job.task.read_cache())
         return self._run_scan_job(job)
 
-    def _scan_options(
-        self,
-        defaults: Mapping[str, Any] | None = None,
-        overrides: Mapping[str, Any] | None = None,
-        *,
-        force: bool = False,
-    ) -> HDF5ScanOptions:
-        """Merge option defaults while treating ``None`` as no override."""
-        valid_keys = {field.name for field in fields(HDF5ScanOptions)}
-        values = asdict(HDF5ScanOptions())
-
-        for source_name, source in (("defaults", defaults), ("overrides", overrides)):
-            if not source:
-                continue
-            unknown_keys = set(source).difference(valid_keys)
-            if unknown_keys:
-                raise ValueError(
-                    f"Unknown HDF5 scan option key in {source_name}: "
-                    + ", ".join(sorted(unknown_keys))
-                )
-            values.update({key: value for key, value in source.items() if value is not None})
-
-        values["force"] = force
-        return HDF5ScanOptions(**values)
+    def _scan_options(self, *, force: bool = False) -> HDF5ScanOptions:
+        """Return global HDF5 scan options for this analysis."""
+        return hdf5_scan_options_from_config(self.config, force=force)
 
 
 def _run_file_tasks_worker(
@@ -304,6 +313,35 @@ def _merge_columns_by_table(
         table: None if table_columns is None else sorted(table_columns)
         for table, table_columns in columns.items()
     }
+
+
+def _filter_df_dict_by_sample(
+    df_dict: Dict[str, pd.DataFrame], sample_every_nb_time: float | None
+) -> Dict[str, pd.DataFrame]:
+    if sample_every_nb_time is None or sample_every_nb_time <= 0:
+        return df_dict
+    filtered: Dict[str, pd.DataFrame] = {}
+    for table_name, df in df_dict.items():
+        if df.empty:
+            filtered[table_name] = df
+            continue
+        if "TTOT" in df.columns:
+            mask = (
+                df["TTOT"]
+                .astype(float)
+                .map(lambda value: ttot_matches_sample(value, sample_every_nb_time))
+            )
+            filtered[table_name] = df.loc[mask].copy()
+        elif table_name == "scalars":
+            mask = (
+                pd.Index(df.index)
+                .astype(float)
+                .map(lambda value: ttot_matches_sample(value, sample_every_nb_time))
+            )
+            filtered[table_name] = df.loc[mask].copy()
+        else:
+            filtered[table_name] = df
+    return filtered
 
 
 class HDF5ScanSession:
@@ -397,7 +435,7 @@ class FeatherMetaCacheMixin:
     ) -> Dict[str, Any]:
         return {
             "schema_version": self.schema_version,
-            "scan_options": asdict(options),
+            "scan_options": persistent_scan_options(options),
             "last_ttot": _last_ttot(cache_df),
             "processed_files": processed_files,
         }
@@ -412,6 +450,13 @@ def file_mtime(hdf5_path: str) -> float:
         return float(os.path.getmtime(hdf5_path))
     except OSError:
         return np.nan
+
+
+def persistent_scan_options(options: HDF5ScanOptions) -> Dict[str, Any]:
+    """Options persisted in metadata for cache compatibility checks."""
+    values = asdict(options)
+    values.pop("force", None)
+    return values
 
 
 def file_times_from_scalars(df_dict: Mapping[str, pd.DataFrame]) -> list[float]:

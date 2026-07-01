@@ -15,6 +15,31 @@ from dragon3_pipelines.utils import can_convert_to_float
 
 logger = logging.getLogger(__name__)
 
+REMOVED_CONFIG_KEYS: Dict[Tuple[str, ...], str] = {
+    ("processing", "plot_only_int_nbody_time"): "hdf5.file_selection.sample_every_nb_time",
+    ("current_lagrangian", "sample_every_nb_time"): "hdf5.file_selection.sample_every_nb_time",
+    ("current_lagrangian", "wait_age_hour"): "hdf5.file_selection.wait_age_hour",
+    ("current_lagrangian", "use_hdf5_cache"): "hdf5.table_cache.use_hdf5_cache",
+    ("current_lagrangian", "parallel"): "hdf5.scan.parallel",
+    ("current_lagrangian", "processes"): "processing.processes_count",
+    ("galactic_orbit", "sample_every_nb_time"): "hdf5.file_selection.sample_every_nb_time",
+    ("galactic_orbit", "wait_age_hour"): "hdf5.file_selection.wait_age_hour",
+    ("galactic_orbit", "use_hdf5_cache"): "hdf5.table_cache.use_hdf5_cache",
+    ("galactic_orbit", "parallel"): "hdf5.scan.parallel",
+    ("galactic_orbit", "processes"): "processing.processes_count",
+    (
+        "binary_stellar_type_extraction",
+        "sample_every_nb_time",
+    ): "hdf5.file_selection.sample_every_nb_time",
+    ("binary_stellar_type_extraction", "wait_age_hour"): "hdf5.file_selection.wait_age_hour",
+    (
+        "binary_stellar_type_extraction",
+        "use_hdf5_cache",
+    ): "hdf5.table_cache.use_hdf5_cache",
+    ("binary_stellar_type_extraction", "parallel"): "hdf5.scan.parallel",
+    ("binary_stellar_type_extraction", "processes"): "processing.processes_count",
+}
+
 
 def load_config(config_path: Optional[str] = None) -> "ConfigManager":
     """
@@ -85,12 +110,12 @@ class ConfigManager:
         proc = config["processing"]
         self.skip_until_of: Dict[str, Union[float, str]] = proc["skip_until"]
         self.skip_existing_plot: bool = proc["skip_existing_plot"]
-        self.plot_only_int_nbody_time: bool = proc["plot_only_int_nbody_time"]
         self.close_figure_in_ipython: bool = proc["close_figure_in_ipython"]
         self.processes_count: int = proc["processes_count"]
         self.tasks_per_child: int = proc["tasks_per_child"]
         self.mem_max_gb: float = proc["mem_max_gb"]
         self.inode_limit: int = proc["inode_limit"]
+        self.hdf5: Dict[str, Any] = config["hdf5"]
 
         # Lagrangian radii
         self.selected_lagr_percent: List[str] = config["selected_lagr_percent"]
@@ -136,6 +161,8 @@ class ConfigManager:
         """
         with open(config_path, "r") as f:
             user_config = yaml.safe_load(f)
+        user_config = user_config or {}
+        self._raise_for_removed_config_keys(user_config)
 
         # Simple deep merge - can be extended for more complex merging
         if "paths" in user_config:
@@ -152,12 +179,21 @@ class ConfigManager:
             proc = user_config["processing"]
             if "processes_count" in proc:
                 self.processes_count = proc["processes_count"]
+            if "tasks_per_child" in proc:
+                self.tasks_per_child = proc["tasks_per_child"]
             if "skip_until" in proc:
                 self.skip_until_of.update(proc["skip_until"])
+            if "skip_existing_plot" in proc:
+                self.skip_existing_plot = proc["skip_existing_plot"]
+            if "close_figure_in_ipython" in proc:
+                self.close_figure_in_ipython = proc["close_figure_in_ipython"]
             if "mem_max_gb" in proc:
                 self.mem_max_gb = proc["mem_max_gb"]
             if "inode_limit" in proc:
                 self.inode_limit = proc["inode_limit"]
+
+        if "hdf5" in user_config:
+            self._deep_update(self.hdf5, user_config["hdf5"])
 
         if "current_lagrangian" in user_config:
             self.current_lagrangian.update(user_config["current_lagrangian"])
@@ -169,6 +205,32 @@ class ConfigManager:
             self.binary_stellar_type_extraction.update(
                 user_config["binary_stellar_type_extraction"]
             )
+
+    def _raise_for_removed_config_keys(self, user_config: Dict[str, Any]) -> None:
+        """Reject pre-1.0 scan configuration keys with migration guidance."""
+        removed = []
+        for key_path, new_path in REMOVED_CONFIG_KEYS.items():
+            cursor: Any = user_config
+            for key in key_path:
+                if not isinstance(cursor, dict) or key not in cursor:
+                    break
+                cursor = cursor[key]
+            else:
+                removed.append((".".join(key_path), new_path))
+        if removed:
+            details = "; ".join(f"{old} -> {new}" for old, new in removed)
+            raise ValueError(
+                "Removed pre-1.0 HDF5 scan configuration key(s) found. "
+                f"Migrate them to the new global hdf5 schema: {details}"
+            )
+
+    def _deep_update(self, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Recursively merge nested user configuration into defaults."""
+        for key, value in source.items():
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
+                self._deep_update(target[key], value)
+            else:
+                target[key] = value
 
     def _setup_derived_attributes(self) -> None:
         """Set up derived attributes that depend on configuration"""

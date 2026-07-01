@@ -83,9 +83,19 @@ processing:
   processes_count: 40
   skip_existing_plot: true
 
+hdf5:
+  file_selection:
+    wait_age_hour: 24
+    sample_every_nb_time: 1.0
+    exclude_bad_dirname: true
+  table_cache:
+    use_hdf5_cache: true
+  scan:
+    parallel: false
+    incremental_from_cache_tail: true
+
 galactic_orbit:
   enabled: true
-  sample_every_nb_time: 1.0
   time_color_max_myr: 500.0
 ```
 

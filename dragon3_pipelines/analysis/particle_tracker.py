@@ -143,7 +143,7 @@ class ParticleTracker:
             )
 
         # 1. Get all HDF5 files
-        hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name, wait_age_hour=24)
+        hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)
 
         # 2. Build progress dict from individual particle history files
         progress_dict = self._build_progress_dict(simu_name, particle_names)

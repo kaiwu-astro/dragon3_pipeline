@@ -21,6 +21,7 @@ from dragon3_pipelines.analysis.hdf5_scan import (
     HDF5ScanRunner,
     HDF5ScanSession,
     ScanBackedAnalysisBase,
+    hdf5_scan_options_from_config,
 )
 from dragon3_pipelines.io import HDF5FileProcessor
 
@@ -32,15 +33,20 @@ def make_config(tmp_path: Path) -> Mock:
     config.particle_df_cache_dir_of = {"sim": str(tmp_path / "cache" / "sim" / "particle_df")}
     config.input_file_path_of = {"sim": str(tmp_path / "input.inp")}
     config.processes_count = 2
+    config.tasks_per_child = 3
+    config.hdf5 = {
+        "file_selection": {
+            "wait_age_hour": 0,
+            "sample_every_nb_time": 1.0,
+            "exclude_bad_dirname": True,
+        },
+        "table_cache": {"use_hdf5_cache": True},
+        "scan": {"parallel": False, "incremental_from_cache_tail": True},
+    }
     config.kw_to_stellar_type = {1: "MS", 13: "NS", 14: "BH"}
     config.stellar_type_to_kw = {"MS": 1, "NS": 13, "BH": 14}
     config.compact_object_KW = np.array([10, 11, 12, 13, 14])
     config.binary_stellar_type_extraction = {
-        "sample_every_nb_time": 1.0,
-        "wait_age_hour": 0,
-        "use_hdf5_cache": True,
-        "parallel": False,
-        "processes": None,
         "cache_filename_template": "binaries_with_{target}_until_{last_ttot:.6f}.feather",
     }
     return config
@@ -264,32 +270,19 @@ class ScanBackedAnalysisForTest(ScanBackedAnalysisBase):
 
 
 def test_scan_backed_analysis_scan_options_merge_and_validate(tmp_path: Path) -> None:
-    analysis = ScanBackedAnalysisForTest(make_config(tmp_path), FakeProcessor([], {}))
+    config = make_config(tmp_path)
+    config.hdf5["file_selection"]["sample_every_nb_time"] = 2.0
+    config.hdf5["scan"]["parallel"] = True
+    config.hdf5["table_cache"]["use_hdf5_cache"] = False
+    analysis = ScanBackedAnalysisForTest(config, FakeProcessor([], {}))
 
-    options = analysis._scan_options(
-        defaults={
-            "sample_every_nb_time": 2.0,
-            "parallel": True,
-            "use_hdf5_cache": True,
-            "processes": 8,
-        },
-        overrides={
-            "sample_every_nb_time": None,
-            "parallel": False,
-            "use_hdf5_cache": False,
-            "processes": None,
-        },
-        force=True,
-    )
-
+    options = analysis._scan_options(force=True)
     assert options.sample_every_nb_time == 2.0
-    assert options.parallel is False
+    assert options.parallel is True
     assert options.use_hdf5_cache is False
-    assert options.processes == 8
+    assert not hasattr(options, "processes")
     assert options.force is True
-
-    with pytest.raises(ValueError, match="typo"):
-        analysis._scan_options(defaults={"typo": 1})
+    assert hdf5_scan_options_from_config(config).wait_age_hour == 0
 
 
 def test_scan_backed_analysis_cache_only_path_does_not_touch_hdf5(tmp_path: Path) -> None:
@@ -423,7 +416,17 @@ def test_scan_runner_incremental_tail_checks_only_last_processed_and_later(
         for idx, path in enumerate(paths)
     }
     processor = FakeProcessor(paths, tables)
-    meta = {"processed_files": {paths[0]: {"mtime": 1.0}, paths[1]: {"mtime": 1.0}}}
+    meta = {
+        "scan_options": {
+            "sample_every_nb_time": 1.0,
+            "wait_age_hour": 0,
+            "use_hdf5_cache": True,
+            "parallel": False,
+            "exclude_bad_dirname": True,
+            "incremental_from_cache_tail": True,
+        },
+        "processed_files": {paths[0]: {"mtime": 1.0}, paths[1]: {"mtime": 1.0}},
+    }
     task = MetaTask("tail", meta)
     runner = HDF5ScanRunner(config, processor)
 
@@ -449,7 +452,6 @@ def test_scan_runner_force_ignores_old_cache_and_meta(tmp_path: Path) -> None:
         {"processed_files": {hdf5_path: {"mtime": 1.0}}},
         pd.DataFrame({"old": [1]}),
     )
-    task.fresh_paths = {hdf5_path}
     runner = HDF5ScanRunner(config, processor)
 
     result = runner.run("sim", [task], HDF5ScanOptions(wait_age_hour=0, force=True))
@@ -457,6 +459,31 @@ def test_scan_runner_force_ignores_old_cache_and_meta(tmp_path: Path) -> None:
     assert processor.read_count == 1
     assert task.fresh_checks == []
     assert "old" not in result["force"].columns
+
+
+def test_scan_runner_rebuilds_cache_when_old_meta_has_no_scan_options(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = str(tmp_path / "snap.40_1.0.h5part")
+    Path(hdf5_path).write_text("fake")
+    tables = {
+        hdf5_path: {
+            "scalars": pd.DataFrame({"TTOT": [1.0]}),
+            "binaries": pd.DataFrame({"TTOT": [1.0]}),
+        }
+    }
+    processor = FakeProcessor([hdf5_path], tables)
+    task = MetaTask(
+        "legacy",
+        {"processed_files": {hdf5_path: {"mtime": 1.0}}},
+        pd.DataFrame({"old": [1]}),
+    )
+    runner = HDF5ScanRunner(config, processor)
+
+    result = runner.run("sim", [task], HDF5ScanOptions(wait_age_hour=0))
+
+    assert processor.read_count == 1
+    assert task.fresh_checks == [hdf5_path]
+    assert "old" not in result["legacy"].columns
 
 
 def compact_tables(rows: list[tuple[int, int, int, int, float, float]]) -> dict[str, pd.DataFrame]:
@@ -484,8 +511,8 @@ def test_compact_counter_reuses_fresh_scan_cache(tmp_path: Path) -> None:
     counter = CompactBinaryCounter(config)
     counter.hdf5_file_processor = processor
 
-    first = counter.summarize_simulation("sim", wait_age_hour=0)
-    second = counter.summarize_simulation("sim", wait_age_hour=0)
+    first = counter.summarize_simulation("sim")
+    second = counter.summarize_simulation("sim")
 
     assert processor.read_count == 1
     assert first["summary"] == second["summary"]
@@ -508,9 +535,9 @@ def test_compact_counter_append_scans_only_tail_range(tmp_path: Path) -> None:
     counter = CompactBinaryCounter(config)
     counter.hdf5_file_processor = processor
 
-    counter.summarize_simulation("sim", wait_age_hour=0)
+    counter.summarize_simulation("sim")
     processor.hdf5_paths = [first_path, second_path]
-    result = counter.summarize_simulation("sim", wait_age_hour=0)
+    result = counter.summarize_simulation("sim")
 
     assert processor.read_count == 2
     assert result["summary"]["scanned_files"] == 2
@@ -530,11 +557,11 @@ def test_compact_counter_replaces_stale_last_file_ttot_rows(tmp_path: Path) -> N
     counter = CompactBinaryCounter(config)
     counter.hdf5_file_processor = processor
 
-    first = counter.summarize_simulation("sim", wait_age_hour=0)
+    first = counter.summarize_simulation("sim")
     processor.tables_by_path[str(hdf5_path)] = compact_tables([(5, 6, 13, 1, 1.0, 10.0)])
     hdf5_path.write_text("changed")
     os.utime(hdf5_path, (hdf5_path.stat().st_atime + 5, hdf5_path.stat().st_mtime + 5))
-    second = counter.summarize_simulation("sim", wait_age_hour=0)
+    second = counter.summarize_simulation("sim")
 
     assert processor.read_count == 2
     assert first["summary"]["gw_source"] == 1
@@ -720,7 +747,7 @@ def test_b_type_extractor_filters_members_marks_primordial_and_writes_meta(
     fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
     extractor.hdf5_file_processor = fake_processor
 
-    result = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    result = extractor.load_b_type_binaries("sim")
 
     assert result["extra_processed_column"].tolist() == [
         "member1-lower-boundary",
@@ -751,7 +778,7 @@ def test_b_type_extractor_filters_members_marks_primordial_and_writes_meta(
     assert meta["primordial_signature"]["meta"]["row_count"] == 2
     assert meta["processed_files"][str(hdf5_path)]["ttot"] == [0.0, 1.0]
 
-    result_again = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    result_again = extractor.load_b_type_binaries("sim")
     assert fake_processor.read_count == 2
     pd.testing.assert_frame_equal(result, result_again)
 
@@ -777,7 +804,7 @@ def test_b_type_extractor_refreshes_when_primordial_cache_changes(tmp_path: Path
     fake_processor = FakeProcessor([str(hdf5_path)], make_primordial_tables(hdf5_path, binaries))
     extractor.hdf5_file_processor = fake_processor
 
-    first = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    first = extractor.load_b_type_binaries("sim")
     assert first["is_primordial_binary"].tolist() == [True]
     assert fake_processor.read_count == 2
 
@@ -788,7 +815,7 @@ def test_b_type_extractor_refreshes_when_primordial_cache_changes(tmp_path: Path
     meta["row_count"] = 0
     primordial_meta.write_text(json.dumps(meta, indent=2, sort_keys=True))
 
-    second = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    second = extractor.load_b_type_binaries("sim")
 
     assert fake_processor.read_count == 3
     assert second["is_primordial_binary"].tolist() == [True]
@@ -817,7 +844,7 @@ def test_b_type_extractor_handles_duplicate_binary_indices(tmp_path: Path) -> No
         [str(hdf5_path)], make_primordial_tables(hdf5_path, binaries)
     )
 
-    result = extractor.load_b_type_binaries("sim", wait_age_hour=0)
+    result = extractor.load_b_type_binaries("sim")
 
     assert result["TTOT"].tolist() == [1.0, 2.0]
     assert result["b_type_member1"].tolist() == [True, True]

@@ -5,8 +5,10 @@ Tests for dragon3_pipelines.config module
 from pathlib import Path
 
 import yaml
+import pytest
 
 from dragon3_pipelines.config import ConfigManager, load_config
+import dragon3_pipelines
 
 
 class TestConfigManager:
@@ -23,6 +25,7 @@ class TestConfigManager:
         assert hasattr(config, "processes_count")
         assert hasattr(config, "kw_to_stellar_type")
         assert hasattr(config, "galactic_orbit")
+        assert hasattr(config, "hdf5")
 
         # Check specific values
         assert isinstance(config.pathof, dict)
@@ -37,6 +40,12 @@ class TestConfigManager:
         assert config.galactic_orbit["enabled"] is True
         assert config.galactic_orbit["cache_filename"] == "galactic_orbit.feather"
         assert config.galactic_orbit["time_color_max_myr"] == 500.0
+        assert config.hdf5["file_selection"]["wait_age_hour"] == 24
+        assert config.hdf5["file_selection"]["sample_every_nb_time"] == 1.0
+        assert config.hdf5["file_selection"]["exclude_bad_dirname"] is True
+        assert config.hdf5["table_cache"]["use_hdf5_cache"] is True
+        assert config.hdf5["scan"]["parallel"] is False
+        assert config.hdf5["scan"]["incremental_from_cache_tail"] is True
 
         # Check stellar types are loaded
         assert 14 in config.kw_to_stellar_type
@@ -105,14 +114,14 @@ class TestConfigManager:
         assert config.analysis_cache_dir_of["0sb"] == f"{root}/0sb"
         assert config.particle_df_cache_dir_of["0sb"] == f"{root}/0sb/particle_df"
 
-    def test_user_config_overrides_galactic_orbit(self, temp_dir):
-        """Test user config can override galactic orbit settings."""
+    def test_user_config_overrides_galactic_orbit_and_hdf5(self, temp_dir):
+        """Test user config can override feature and global HDF5 settings."""
         user_config = {
-            "galactic_orbit": {
-                "enabled": False,
-                "sample_every_nb_time": 2.0,
-                "time_color_max_myr": 750.0,
-            }
+            "galactic_orbit": {"enabled": False, "time_color_max_myr": 750.0},
+            "hdf5": {
+                "file_selection": {"sample_every_nb_time": 2.0, "wait_age_hour": 0},
+                "scan": {"parallel": True},
+            },
         }
         user_config_path = temp_dir / "user_galactic_orbit_config.yaml"
         with open(user_config_path, "w") as f:
@@ -121,9 +130,27 @@ class TestConfigManager:
         config = ConfigManager(config_path=str(user_config_path))
 
         assert config.galactic_orbit["enabled"] is False
-        assert config.galactic_orbit["sample_every_nb_time"] == 2.0
         assert config.galactic_orbit["time_color_max_myr"] == 750.0
         assert config.galactic_orbit["cache_filename"] == "galactic_orbit.feather"
+        assert config.hdf5["file_selection"]["sample_every_nb_time"] == 2.0
+        assert config.hdf5["file_selection"]["wait_age_hour"] == 0
+        assert config.hdf5["scan"]["parallel"] is True
+        assert config.hdf5["table_cache"]["use_hdf5_cache"] is True
+
+    def test_removed_pre_1_config_keys_raise(self, temp_dir):
+        user_config = {
+            "processing": {"plot_only_int_nbody_time": True},
+            "galactic_orbit": {"sample_every_nb_time": 2.0},
+        }
+        user_config_path = temp_dir / "old_config.yaml"
+        with open(user_config_path, "w") as f:
+            yaml.dump(user_config, f)
+
+        with pytest.raises(ValueError, match="hdf5.file_selection.sample_every_nb_time"):
+            ConfigManager(config_path=str(user_config_path))
+
+    def test_version_is_1_0_0(self):
+        assert dragon3_pipelines.__version__ == "1.0.0"
 
     def test_user_config_merge(self, temp_dir):
         """Test merging user configuration with defaults"""

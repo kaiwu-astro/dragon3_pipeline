@@ -32,6 +32,7 @@ from dragon3_pipelines.analysis import (
     GalacticOrbitProcessor,
     ParticleTracker,
 )
+from dragon3_pipelines.analysis.hdf5_scan import ttot_matches_sample
 
 # Setup logger
 try:
@@ -72,12 +73,17 @@ class SimulationPlotter:
 
         # 加载数据
         df_dict = self.hdf5_file_processor.read_file(hdf5_file_path, simu_name)
+        sample_every_nb_time = (
+            getattr(self.config, "hdf5", {})
+            .get("file_selection", {})
+            .get("sample_every_nb_time", 1.0)
+        )
 
         # 处理每个时间点
         for ttot in df_dict["scalars"]["TTOT"].unique():
             if ttot < self.config.skip_until_of[simu_name]:
                 continue
-            if self.config.plot_only_int_nbody_time and not ttot.is_integer():
+            if not ttot_matches_sample(float(ttot), sample_every_nb_time):
                 continue
             logger.debug(f"{ttot=}", end=" | ")
 

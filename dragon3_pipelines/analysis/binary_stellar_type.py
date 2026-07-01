@@ -32,11 +32,6 @@ class BinaryStellarTypeExtractor(ScanBackedAnalysisBase):
         stellar_type: str | None = None,
         kw: int | str | None = None,
         update: bool = True,
-        sample_every_nb_time: float | None = None,
-        wait_age_hour: int | float | None = None,
-        use_hdf5_cache: bool | None = None,
-        parallel: bool | None = None,
-        processes: int | None = None,
         force: bool = False,
     ) -> pd.DataFrame:
         """Return complete processed binary rows matching one stellar type or KW code."""
@@ -44,11 +39,6 @@ class BinaryStellarTypeExtractor(ScanBackedAnalysisBase):
             simu_name,
             stellar_type=stellar_type,
             kw=kw,
-            sample_every_nb_time=sample_every_nb_time,
-            wait_age_hour=wait_age_hour,
-            use_hdf5_cache=use_hdf5_cache,
-            parallel=parallel,
-            processes=processes,
             force=force,
         )
         return self._load_or_update_scan_job(job, update=update)
@@ -59,11 +49,6 @@ class BinaryStellarTypeExtractor(ScanBackedAnalysisBase):
         *,
         stellar_type: str | None = None,
         kw: int | str | None = None,
-        sample_every_nb_time: float | None = None,
-        wait_age_hour: int | float | None = None,
-        use_hdf5_cache: bool | None = None,
-        parallel: bool | None = None,
-        processes: int | None = None,
         force: bool = False,
     ) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
@@ -74,24 +59,7 @@ class BinaryStellarTypeExtractor(ScanBackedAnalysisBase):
             target_kw=target_kw,
             stellar_type=normalized_stellar_type,
         )
-        config = self._extraction_config()
-        options = self._scan_options(
-            defaults={
-                "sample_every_nb_time": config["sample_every_nb_time"],
-                "wait_age_hour": config["wait_age_hour"],
-                "use_hdf5_cache": config["use_hdf5_cache"],
-                "parallel": config["parallel"],
-                "processes": config["processes"],
-            },
-            overrides={
-                "sample_every_nb_time": sample_every_nb_time,
-                "wait_age_hour": wait_age_hour,
-                "use_hdf5_cache": use_hdf5_cache,
-                "parallel": parallel,
-                "processes": processes,
-            },
-            force=force,
-        )
+        options = self._scan_options(force=force)
         return HDF5ScanJob(simu_name, task, options)
 
     def resolve_target(
@@ -119,11 +87,6 @@ class BinaryStellarTypeExtractor(ScanBackedAnalysisBase):
 
     def _extraction_config(self) -> Dict[str, Any]:
         defaults = {
-            "sample_every_nb_time": 1.0,
-            "wait_age_hour": 24,
-            "use_hdf5_cache": True,
-            "parallel": False,
-            "processes": None,
             "cache_filename_template": "binaries_with_{target}_until_{last_ttot:.6f}.feather",
         }
         user_config = getattr(self.config, "binary_stellar_type_extraction", {}) or {}
