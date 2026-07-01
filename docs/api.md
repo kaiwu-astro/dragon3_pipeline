@@ -91,6 +91,10 @@ Developer extension pattern: new analysis/data-reduction features that scan HDF5
 
 Count compact binary categories across snapshots. `summarize_simulation()` returns the existing `{"summary": ..., "details": ...}` structure and caches per-snapshot category hits under `compact_binary_count`.
 
+### `dragon3_pipelines.analysis.GalacticOrbitProcessor`
+
+Build cluster galactic-orbit points from scalar HDF5 snapshots. `load_plot_data()` returns de-duplicated rows containing `TTOT`, `Time[Myr]`, `RG(1..3)`, `VG(1..3)`, and source tracking columns. Results are cached under `galactic_orbit`.
+
 ### `dragon3_pipelines.analysis.tau_gw`
 
 Calculate gravitational wave merger timescales.
@@ -107,6 +111,7 @@ Calculate gravitational wave merger timescales.
 - `SingleStarVisualizer`: Visualize single star properties
 - `BinaryStarVisualizer`: Visualize binary star systems
 - `LagrVisualizer`: Visualize Lagrangian radii evolution
+- `GalacticOrbitVisualizer`: Visualize cluster galactic orbits as static 2D projections and Plotly 3D HTML
 - `CollCoalVisualizer`: Visualize collision and coalescence events
 
 ## Utilities

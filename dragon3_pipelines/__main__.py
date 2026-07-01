@@ -21,8 +21,17 @@ from rich.logging import RichHandler
 
 from dragon3_pipelines.config import ConfigManager
 from dragon3_pipelines.io import HDF5FileProcessor, LagrFileProcessor
-from dragon3_pipelines.visualization import HDF5Visualizer, LagrVisualizer, PlotPurger
-from dragon3_pipelines.analysis import CurrentMassLagrangianProcessor, ParticleTracker
+from dragon3_pipelines.visualization import (
+    GalacticOrbitVisualizer,
+    HDF5Visualizer,
+    LagrVisualizer,
+    PlotPurger,
+)
+from dragon3_pipelines.analysis import (
+    CurrentMassLagrangianProcessor,
+    GalacticOrbitProcessor,
+    ParticleTracker,
+)
 
 # Setup logger
 try:
@@ -41,8 +50,10 @@ class SimulationPlotter:
         self.lagr_file_processor = LagrFileProcessor(config_manager)
         self.hdf5_visualizer = HDF5Visualizer(config_manager)
         self.lagr_visualizer = LagrVisualizer(config_manager)
+        self.galactic_orbit_visualizer = GalacticOrbitVisualizer(config_manager)
         self.particle_tracker = ParticleTracker(config_manager)
         self.current_lagrangian_processor = CurrentMassLagrangianProcessor(config_manager)
+        self.galactic_orbit_processor = GalacticOrbitProcessor(config_manager)
 
     def plot_hdf5_file(self, hdf5_file_path: str, simu_name: str) -> None:
         """处理单个HDF5文件（包含多个snapshot）
@@ -227,6 +238,17 @@ class SimulationPlotter:
         plt.close("all")
         gc.collect()
 
+    def plot_galactic_orbit(self, simu_name: str) -> None:
+        """处理星团在星系中的轨道数据"""
+        orbit_df = self.galactic_orbit_processor.load_plot_data(simu_name, update=True)
+        if orbit_df.empty:
+            logger.info(f"No galactic orbit data for {simu_name}, skipping plots")
+            return
+        self.galactic_orbit_visualizer.create_projection_plot(orbit_df, simu_name)
+        self.galactic_orbit_visualizer.create_interactive_3d_html(orbit_df, simu_name)
+        plt.close("all")
+        gc.collect()
+
     def plot_all_simulations(self) -> None:
         """处理所有模拟"""
         for simu_name in self.config.pathof.keys():
@@ -234,6 +256,8 @@ class SimulationPlotter:
             self.plot_lagr(simu_name)
             if self.config.current_lagrangian.get("enabled", True):
                 self.plot_current_mass_lagr(simu_name)
+            if self.config.galactic_orbit.get("enabled", True):
+                self.plot_galactic_orbit(simu_name)
 
             # 获取所有HDF5文件
             hdf5_files = self.hdf5_file_processor.get_all_hdf5_paths(simu_name)

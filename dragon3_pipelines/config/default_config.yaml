@@ -56,6 +56,17 @@ current_lagrangian:
   wait_age_hour: 24
   cache_filename: "current_mass_lagr.feather"
 
+# Cluster orbit in the host galaxy built from scalar HDF5 snapshots
+galactic_orbit:
+  enabled: true
+  sample_every_nb_time: 1.0
+  wait_age_hour: 24
+  use_hdf5_cache: true
+  parallel: false
+  processes: null
+  cache_filename: "galactic_orbit.feather"
+  time_color_max_myr: 500.0
+
 # Binary rows containing a requested stellar type, built from HDF5 snapshots
 binary_stellar_type_extraction:
   sample_every_nb_time: 1.0

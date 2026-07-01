@@ -82,6 +82,11 @@ paths:
 processing:
   processes_count: 40
   skip_existing_plot: true
+
+galactic_orbit:
+  enabled: true
+  sample_every_nb_time: 1.0
+  time_color_max_myr: 500.0
 ```
 
 Load it in your code:
@@ -163,6 +168,20 @@ session.add_job(BinaryStellarTypeExtractor(config).build_scan_job("my_sim", stel
 session.add_job(BTypeBinaryExtractor(config).build_scan_job("my_sim"))
 results = session.run()
 ```
+
+### Plot the Cluster Galactic Orbit
+
+```python
+from dragon3_pipelines.analysis import GalacticOrbitProcessor
+from dragon3_pipelines.visualization import GalacticOrbitVisualizer
+
+orbit_df = GalacticOrbitProcessor(config).load_plot_data("my_sim")
+viz = GalacticOrbitVisualizer(config)
+viz.create_projection_plot(orbit_df, "my_sim")
+viz.create_interactive_3d_html(orbit_df, "my_sim")
+```
+
+This scan-backed analysis caches scalar snapshot rows under `galactic_orbit` and plots the cluster position columns `RG(1..3)` colored by `Time[Myr]`.
 
 ### Create Visualizations
 

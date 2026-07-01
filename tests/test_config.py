@@ -22,6 +22,7 @@ class TestConfigManager:
         assert hasattr(config, "figname_prefix")
         assert hasattr(config, "processes_count")
         assert hasattr(config, "kw_to_stellar_type")
+        assert hasattr(config, "galactic_orbit")
 
         # Check specific values
         assert isinstance(config.pathof, dict)
@@ -33,6 +34,9 @@ class TestConfigManager:
         assert hasattr(config, "inode_limit")
         assert config.mem_max_gb == 40.0
         assert config.inode_limit == 2000000
+        assert config.galactic_orbit["enabled"] is True
+        assert config.galactic_orbit["cache_filename"] == "galactic_orbit.feather"
+        assert config.galactic_orbit["time_color_max_myr"] == 500.0
 
         # Check stellar types are loaded
         assert 14 in config.kw_to_stellar_type
@@ -100,6 +104,26 @@ class TestConfigManager:
         assert config.analysis_cache_dir == root
         assert config.analysis_cache_dir_of["0sb"] == f"{root}/0sb"
         assert config.particle_df_cache_dir_of["0sb"] == f"{root}/0sb/particle_df"
+
+    def test_user_config_overrides_galactic_orbit(self, temp_dir):
+        """Test user config can override galactic orbit settings."""
+        user_config = {
+            "galactic_orbit": {
+                "enabled": False,
+                "sample_every_nb_time": 2.0,
+                "time_color_max_myr": 750.0,
+            }
+        }
+        user_config_path = temp_dir / "user_galactic_orbit_config.yaml"
+        with open(user_config_path, "w") as f:
+            yaml.dump(user_config, f)
+
+        config = ConfigManager(config_path=str(user_config_path))
+
+        assert config.galactic_orbit["enabled"] is False
+        assert config.galactic_orbit["sample_every_nb_time"] == 2.0
+        assert config.galactic_orbit["time_color_max_myr"] == 750.0
+        assert config.galactic_orbit["cache_filename"] == "galactic_orbit.feather"
 
     def test_user_config_merge(self, temp_dir):
         """Test merging user configuration with defaults"""

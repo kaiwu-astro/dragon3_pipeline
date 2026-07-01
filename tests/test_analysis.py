@@ -11,6 +11,7 @@ from dragon3_pipelines.__main__ import SimulationPlotter
 from dragon3_pipelines.analysis import (
     CompactBinaryCounter,
     CurrentMassLagrangianProcessor,
+    GalacticOrbitProcessor,
     ParticleTracker,
     tau_gw,
 )
@@ -849,6 +850,7 @@ class TestSimulationPlotterCurrentLagrangian:
         config = Mock()
         config.pathof = {"test_simu": str(tmp_path)}
         config.current_lagrangian = {"enabled": True}
+        config.galactic_orbit = {"enabled": False}
         config.processes_count = 1
         config.tasks_per_child = 1
         config.analysis_cache_dir_of = {"test_simu": str(tmp_path / "cache" / "test_simu")}
@@ -887,3 +889,150 @@ class TestSimulationPlotterCurrentLagrangian:
 
         plot_lagr.assert_called_once_with("test_simu")
         plot_current.assert_called_once_with("test_simu")
+
+
+class TestGalacticOrbitProcessor:
+    """Tests for galactic-orbit HDF5 scan processing."""
+
+    @pytest.fixture
+    def mock_config(self, tmp_path):
+        config = Mock()
+        config.analysis_cache_dir_of = {"test_simu": str(tmp_path / "cache" / "test_simu")}
+        config.particle_df_cache_dir_of = {
+            "test_simu": str(tmp_path / "cache" / "test_simu" / "particle_df")
+        }
+        config.pathof = {"test_simu": str(tmp_path)}
+        config.processes_count = 1
+        config.galactic_orbit = {
+            "enabled": True,
+            "sample_every_nb_time": 1.0,
+            "wait_age_hour": 0,
+            "use_hdf5_cache": True,
+            "parallel": False,
+            "processes": None,
+            "cache_filename": "galactic_orbit.feather",
+            "time_color_max_myr": 500.0,
+        }
+        return config
+
+    def _scalar_df(self, ttot_values):
+        return pd.DataFrame(
+            {
+                "TTOT": ttot_values,
+                "Time[Myr]": [value * 10.0 for value in ttot_values],
+                "RG(1)": [value for value in ttot_values],
+                "RG(2)": [value + 1.0 for value in ttot_values],
+                "RG(3)": [value + 2.0 for value in ttot_values],
+                "VG(1)": [value + 3.0 for value in ttot_values],
+                "VG(2)": [value + 4.0 for value in ttot_values],
+                "VG(3)": [value + 5.0 for value in ttot_values],
+            }
+        ).set_index("TTOT", drop=False)
+
+    def test_update_caches_every_scalar_row_and_skips_fresh_files(self, mock_config, tmp_path):
+        processor = GalacticOrbitProcessor(mock_config)
+        hdf5_path = tmp_path / "snap.40_1.0.h5part"
+        hdf5_path.touch()
+        processor.hdf5_file_processor.get_all_hdf5_paths = Mock(return_value=[str(hdf5_path)])
+        processor.hdf5_file_processor.get_hdf5_file_time_from_filename = Mock(return_value=1.0)
+        processor.hdf5_file_processor.read_tables = Mock(
+            return_value={"scalars": self._scalar_df([1.0, 1.5, 2.0])}
+        )
+
+        first = processor.update("test_simu")
+        second = processor.update("test_simu")
+
+        assert len(first) == 3
+        assert len(second) == 3
+        assert processor.hdf5_file_processor.read_tables.call_count == 1
+        assert list(first["source_row_index"]) == [0, 1, 2]
+        cache_path = tmp_path / "cache" / "test_simu" / "galactic_orbit" / "galactic_orbit.feather"
+        assert cache_path.exists()
+        assert cache_path.with_name("galactic_orbit.meta.json").exists()
+
+    def test_duplicate_ttot_warns_and_plot_data_keeps_first(self, mock_config, tmp_path, caplog):
+        processor = GalacticOrbitProcessor(mock_config)
+        hdf5_paths = [tmp_path / "snap.40_2.0.h5part", tmp_path / "snap.40_1.0.h5part"]
+        for path in hdf5_paths:
+            path.touch()
+
+        processor.hdf5_file_processor.get_all_hdf5_paths = Mock(
+            return_value=[str(hdf5_paths[0]), str(hdf5_paths[1])]
+        )
+        processor.hdf5_file_processor.get_hdf5_file_time_from_filename = Mock(
+            side_effect=lambda path: 2.0 if "2.0" in path else 1.0
+        )
+        processor.hdf5_file_processor.read_tables = Mock(
+            side_effect=lambda path, *_args, **_kwargs: {
+                "scalars": self._scalar_df([1.0 if "2.0" in path else 1.0])
+            }
+        )
+
+        with caplog.at_level("WARNING"):
+            plot_df = processor.load_plot_data("test_simu")
+
+        assert len(plot_df) == 1
+        assert plot_df["source_file_time"].iloc[0] == pytest.approx(1.0)
+        assert "Duplicate galactic-orbit TTOT values detected" in caplog.text
+
+    def test_build_scan_job_requests_only_scalar_orbit_columns(self, mock_config):
+        processor = GalacticOrbitProcessor(mock_config)
+        task = processor.build_scan_job("test_simu").task
+
+        assert task.required_tables == ("scalars",)
+        assert task.columns_by_table == {
+            "scalars": [
+                "TTOT",
+                "Time[Myr]",
+                "RG(1)",
+                "RG(2)",
+                "RG(3)",
+                "VG(1)",
+                "VG(2)",
+                "VG(3)",
+            ]
+        }
+
+
+class TestSimulationPlotterGalacticOrbit:
+    """Integration tests for galactic-orbit plotter wiring."""
+
+    def test_plot_all_simulations_calls_galactic_orbit_when_enabled(self, tmp_path):
+        config = Mock()
+        config.pathof = {"test_simu": str(tmp_path)}
+        config.current_lagrangian = {"enabled": False}
+        config.galactic_orbit = {"enabled": True}
+        config.processes_count = 1
+        config.tasks_per_child = 1
+
+        class FakePool:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def imap(self, func, iterable):
+                return iter(())
+
+        class FakeContext:
+            def Pool(self, **_kwargs):
+                return FakePool()
+
+        with (
+            patch.object(
+                SimulationPlotter, "__init__", lambda self, cfg: setattr(self, "config", cfg)
+            ),
+            patch.object(SimulationPlotter, "plot_lagr") as plot_lagr,
+            patch.object(SimulationPlotter, "plot_galactic_orbit") as plot_orbit,
+            patch(
+                "dragon3_pipelines.__main__.multiprocessing.get_context", return_value=FakeContext()
+            ),
+        ):
+            plotter = SimulationPlotter(config)
+            plotter.hdf5_file_processor = Mock()
+            plotter.hdf5_file_processor.get_all_hdf5_paths.return_value = []
+            plotter.plot_all_simulations()
+
+        plot_lagr.assert_called_once_with("test_simu")
+        plot_orbit.assert_called_once_with("test_simu")

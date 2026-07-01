@@ -17,6 +17,7 @@ from dragon3_pipelines.visualization import (
     SingleStarVisualizer,
     BinaryStarVisualizer,
     LagrVisualizer,
+    GalacticOrbitVisualizer,
     CollCoalVisualizer,
     set_mpl_fonts,
     add_grid,
@@ -903,6 +904,65 @@ class TestPlotPurger:
 
         assert result.deleted_paths == [path.resolve()]
         assert not path.exists()
+
+
+class TestGalacticOrbitVisualizer:
+    """Tests for galactic-orbit plotting."""
+
+    def _orbit_df(self):
+        return pd.DataFrame(
+            {
+                "TTOT": [1.0, 2.0, 3.0],
+                "Time[Myr]": [10.0, 250.0, 600.0],
+                "RG(1)": [1.0, 2.0, 3.0],
+                "RG(2)": [2.0, 3.0, 4.0],
+                "RG(3)": [3.0, 4.0, 5.0],
+                "VG(1)": [10.0, 20.0, 30.0],
+                "VG(2)": [11.0, 21.0, 31.0],
+                "VG(3)": [12.0, 22.0, 32.0],
+            }
+        )
+
+    def test_projection_plot_has_three_subplots_and_fixed_color_range(
+        self, mock_config, tmp_path, monkeypatch
+    ):
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        mock_config.galactic_orbit = {"time_color_max_myr": 500.0}
+        visualizer = GalacticOrbitVisualizer(mock_config)
+        saved_figures = []
+
+        def fake_savefig(self, path, *args, **kwargs):
+            saved_figures.append((self, Path(path)))
+
+        monkeypatch.setattr(plt.Figure, "savefig", fake_savefig)
+        path = visualizer.create_projection_plot(self._orbit_df(), "sim_a")
+
+        assert path == tmp_path / "a__galactic_orbit_projection.pdf"
+        assert saved_figures[0][1] == path
+        fig = saved_figures[0][0]
+        assert len(fig.axes) == 4
+        projection_axes = fig.axes[:3]
+        assert [ax.get_title() for ax in projection_axes] == ["XY", "YZ", "ZX"]
+        scatter = projection_axes[0].collections[0]
+        assert scatter.norm.vmin == 0.0
+        assert scatter.norm.vmax == 500.0
+
+    def test_plotly_html_uses_3d_scatter_and_fixed_color_range(self, mock_config, tmp_path):
+        pytest.importorskip("plotly")
+        mock_config.plot_dir = str(tmp_path)
+        mock_config.figname_prefix = {"sim_a": "a_"}
+        mock_config.galactic_orbit = {"time_color_max_myr": 500.0}
+        visualizer = GalacticOrbitVisualizer(mock_config)
+
+        path = visualizer.create_interactive_3d_html(self._orbit_df(), "sim_a")
+
+        assert path == tmp_path / "a__galactic_orbit_3d.html"
+        html = path.read_text()
+        assert '"type":"scatter3d"' in html
+        assert '"mode":"markers"' in html
+        assert '"cmin":0' in html
+        assert '"cmax":500' in html
 
 
 class TestPurgeCLI:
