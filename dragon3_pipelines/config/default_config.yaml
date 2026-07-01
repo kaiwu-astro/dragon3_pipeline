@@ -47,7 +47,7 @@ hdf5:
   table_cache:
     use_hdf5_cache: true
   scan:
-    parallel: false
+    parallel: true
     incremental_from_cache_tail: true
 
 # Lagrangian radii percentages to plot
