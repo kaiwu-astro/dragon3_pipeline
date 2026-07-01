@@ -25,7 +25,7 @@ figure_prefixes:
   "20sb": "dragon3_1m_5hb_20sb_Apr2025"
   "60sb": "dragon3_1m_5hb_60sb_Apr2025"
 
-# Processing options
+# Global processing options
 processing:
   skip_until:
     "0sb": "last"
