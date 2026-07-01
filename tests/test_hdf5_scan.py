@@ -14,6 +14,7 @@ import pytest
 from dragon3_pipelines.analysis.b_type_binary import BTypeBinaryExtractor
 from dragon3_pipelines.analysis.binary_stellar_type import BinaryStellarTypeExtractor
 from dragon3_pipelines.analysis.compact_binary_counter import CompactBinaryCounter
+from dragon3_pipelines.analysis import hdf5_scan
 from dragon3_pipelines.analysis.primordial_binary import PrimordialBinaryIdentifier
 from dragon3_pipelines.analysis.hdf5_scan import (
     HDF5ScanJob,
@@ -94,6 +95,28 @@ class FakeProcessor:
     def read_tables(self, hdf5_path, simu_name, tables, columns_by_table=None, use_cache=True):
         self.read_count += 1
         return {table: self.tables_by_path[hdf5_path][table] for table in tables}
+
+
+class FakeProgress:
+    instances: list["FakeProgress"] = []
+
+    def __init__(self):
+        self.tasks: list[dict] = []
+        self.advance_calls: list[int] = []
+        FakeProgress.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def add_task(self, description, total):
+        self.tasks.append({"description": description, "total": total})
+        return len(self.tasks) - 1
+
+    def advance(self, task_id):
+        self.advance_calls.append(task_id)
 
 
 def test_binary_extractor_returns_full_matching_binary_rows_and_writes_meta(tmp_path: Path) -> None:
@@ -347,6 +370,58 @@ def test_scan_runner_reads_each_hdf5_file_once_for_multiple_tasks(tmp_path: Path
     assert result["b"]["task"].tolist() == ["b"]
     assert task_a.writes == 1
     assert task_b.writes == 1
+
+
+def test_scan_runner_progress_advances_once_per_stale_hdf5_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeProgress.instances.clear()
+    monkeypatch.setattr(hdf5_scan, "Progress", FakeProgress)
+    config = make_config(tmp_path)
+    paths = [str(tmp_path / f"snap.40_{idx}.h5part") for idx in range(2)]
+    for path in paths:
+        Path(path).write_text("fake")
+    tables = {
+        path: {
+            "scalars": pd.DataFrame({"TTOT": [float(idx)]}),
+            "binaries": pd.DataFrame({"TTOT": [float(idx)]}),
+        }
+        for idx, path in enumerate(paths)
+    }
+    processor = FakeProcessor(paths, tables)
+    runner = HDF5ScanRunner(config, processor)
+
+    runner.run("sim", [FakeTask("progress")], HDF5ScanOptions(wait_age_hour=0))
+
+    assert len(FakeProgress.instances) == 1
+    progress = FakeProgress.instances[0]
+    assert progress.tasks == [{"description": "sim HDF5 scan", "total": 2}]
+    assert progress.advance_calls == [0, 0]
+
+
+def test_scan_runner_skips_progress_when_no_stale_hdf5_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    FakeProgress.instances.clear()
+    monkeypatch.setattr(hdf5_scan, "Progress", FakeProgress)
+    config = make_config(tmp_path)
+    paths = [str(tmp_path / f"snap.40_{idx}.h5part") for idx in range(2)]
+    for path in paths:
+        Path(path).write_text("fake")
+    tables = {
+        path: {
+            "scalars": pd.DataFrame({"TTOT": [float(idx)]}),
+            "binaries": pd.DataFrame({"TTOT": [float(idx)]}),
+        }
+        for idx, path in enumerate(paths)
+    }
+    task = MetaTask("fresh", {})
+    task.fresh_paths = set(paths)
+    runner = HDF5ScanRunner(config, FakeProcessor(paths, tables))
+
+    runner.run("sim", [task], HDF5ScanOptions(wait_age_hour=0))
+
+    assert FakeProgress.instances == []
 
 
 def test_scan_runner_rejects_duplicate_task_names(tmp_path: Path) -> None:

@@ -19,6 +19,7 @@ from typing import Any, Dict, Iterable, Mapping, Protocol, Sequence
 
 import numpy as np
 import pandas as pd
+from rich.progress import Progress
 
 from dragon3_pipelines.io import HDF5FileProcessor
 
@@ -168,13 +169,19 @@ class HDF5ScanRunner:
             if hdf5_path in stale_tasks_by_file
         ]
 
+        progress_description = f"{simu_name} HDF5 scan"
         if options.parallel and len(work_items) > 1:
             results_by_file = self._run_parallel(simu_name, work_items, states, options)
         else:
-            results_by_file = [
+            file_results = (
                 self._run_file_tasks(simu_name, hdf5_path, file_tasks, states, options)
                 for hdf5_path, file_tasks in work_items
-            ]
+            )
+            results_by_file = _collect_with_progress(
+                file_results,
+                total=len(work_items),
+                description=progress_description,
+            )
 
         for file_result in results_by_file:
             hdf5_path = file_result["hdf5_path"]
@@ -235,7 +242,11 @@ class HDF5ScanRunner:
             for hdf5_path, file_tasks in work_items
         ]
         with ctx.Pool(processes=processes, maxtasksperchild=maxtasksperchild) as pool:
-            return pool.map(_run_file_tasks_worker, args)
+            return _collect_with_progress(
+                pool.imap(_run_file_tasks_worker, args),
+                total=len(work_items),
+                description=f"{simu_name} HDF5 scan",
+            )
 
     def _run_file_tasks(
         self,
@@ -296,6 +307,24 @@ def _run_file_tasks_worker(
     config, simu_name, hdf5_path, file_tasks, states, options = args
     runner = HDF5ScanRunner(config)
     return runner._run_file_tasks(simu_name, hdf5_path, file_tasks, states, options)
+
+
+def _collect_with_progress(
+    iterator: Iterable[Dict[str, Any]],
+    *,
+    total: int,
+    description: str,
+) -> list[Dict[str, Any]]:
+    if total <= 0:
+        return list(iterator)
+
+    results = []
+    with Progress() as progress:
+        task_id = progress.add_task(description, total=total)
+        for result in iterator:
+            results.append(result)
+            progress.advance(task_id)
+    return results
 
 
 def _merge_columns_by_table(
