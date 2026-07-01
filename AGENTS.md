@@ -414,7 +414,7 @@ HDF5 文件中的可绘图信息大体分为两类，维护时应先判断属于
 - **微观信息（microscopic information）**：单个 snapshot 已包含大量对象级信息，例如某一时刻每颗恒星的状态。此类信息通常可以由单个 HDF5 file 生成一张图，应保留在 `SimulationPlotter.plot_hdf5_file` 调度的逐文件绘图流程中。
 - **宏观信息（macroscopic information）**：单个 snapshot 只贡献一个或少量统计点，例如需要画随时间演化的统计量。此类图需要遍历大量 HDF5 files 收集时间序列，应作为 analysis/data-reduction 扫描任务处理。
 
-未来凡是“遍历 HDF5 文件抽取小型信息”的 analysis/data-reduction 功能，优先实现为 `HDF5ScanTask` 并通过 `HDF5ScanRunner` 执行。不要复制新的 HDF5 遍历循环，也不要把这类缓存写入逻辑塞进绘图主循环；`SimulationPlotter.plot_hdf5_file` 应保持绘图调度职责。
+未来凡是“遍历 HDF5 文件抽取小型信息”的 analysis/data-reduction 功能，优先实现为 `HDF5ScanTask` 并通过 `HDF5ScanRunner` 执行。对应的外层 analysis class 应继承 `ScanBackedAnalysisBase`，实现很薄的 `build_scan_job()`；具体数据提取、merge、cache path、meta 语义仍放在独立 task 中。不要复制新的 HDF5 遍历循环，也不要把这类缓存写入逻辑塞进绘图主循环；`SimulationPlotter.plot_hdf5_file` 应保持绘图调度职责。
 
 当同一 simulation 下需要同时运行多个 HDF5 scan task 时，优先通过 `HDF5ScanSession` 堆积 job 后统一 `run()`，让相同 scan options 的任务共享 HDF5 文件读取。默认尾部增量策略会信任已处理尾部之前的旧文件；旧 HDF5 文件被手动改写时应使用 `force=True` 或删除对应 analysis cache 后重建。
 

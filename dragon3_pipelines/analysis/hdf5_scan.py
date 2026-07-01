@@ -13,7 +13,7 @@ import logging
 import multiprocessing
 import os
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Protocol, Sequence
 
@@ -235,6 +235,50 @@ class HDF5ScanRunner:
                 state["cache_df"],
             )
         return {"hdf5_path": hdf5_path, "task_results": task_results}
+
+
+class ScanBackedAnalysisBase:
+    """Shared wrapper logic for analysis classes backed by one HDF5 scan job."""
+
+    def __init__(
+        self, config_manager: Any, hdf5_file_processor: HDF5FileProcessor | None = None
+    ) -> None:
+        self.config = config_manager
+        self.hdf5_file_processor = hdf5_file_processor or HDF5FileProcessor(config_manager)
+
+    def _run_scan_job(self, job: HDF5ScanJob) -> pd.DataFrame:
+        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
+        return runner.run(job.simu_name, [job.task], job.options)[job.task.name]
+
+    def _load_or_update_scan_job(self, job: HDF5ScanJob, *, update: bool) -> pd.DataFrame:
+        if not update:
+            return job.task.finalize_cache(job.task.read_cache())
+        return self._run_scan_job(job)
+
+    def _scan_options(
+        self,
+        defaults: Mapping[str, Any] | None = None,
+        overrides: Mapping[str, Any] | None = None,
+        *,
+        force: bool = False,
+    ) -> HDF5ScanOptions:
+        """Merge option defaults while treating ``None`` as no override."""
+        valid_keys = {field.name for field in fields(HDF5ScanOptions)}
+        values = asdict(HDF5ScanOptions())
+
+        for source_name, source in (("defaults", defaults), ("overrides", overrides)):
+            if not source:
+                continue
+            unknown_keys = set(source).difference(valid_keys)
+            if unknown_keys:
+                raise ValueError(
+                    f"Unknown HDF5 scan option key in {source_name}: "
+                    + ", ".join(sorted(unknown_keys))
+                )
+            values.update({key: value for key, value in source.items() if value is not None})
+
+        values["force"] = force
+        return HDF5ScanOptions(**values)
 
 
 def _run_file_tasks_worker(

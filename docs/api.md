@@ -85,6 +85,8 @@ results = session.run()
 
 `HDF5ScanOptions` defaults to tail-incremental cache validation. Use `force=True` to ignore old cache/meta and rebuild from scratch.
 
+Developer extension pattern: new analysis/data-reduction features that scan HDF5 files for small per-snapshot records should implement an `HDF5ScanTask`, then expose it through a thin analysis class inheriting `ScanBackedAnalysisBase`. Keep extraction, merge, cache path, metadata, and freshness semantics in the task; use the base only for option merging and single-job run/cache loading.
+
 ### `dragon3_pipelines.analysis.CompactBinaryCounter`
 
 Count compact binary categories across snapshots. `summarize_simulation()` returns the existing `{"summary": ..., "details": ...}` structure and caches per-snapshot category hits under `compact_binary_count`.

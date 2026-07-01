@@ -15,7 +15,13 @@ from dragon3_pipelines.analysis.b_type_binary import BTypeBinaryExtractor
 from dragon3_pipelines.analysis.binary_stellar_type import BinaryStellarTypeExtractor
 from dragon3_pipelines.analysis.compact_binary_counter import CompactBinaryCounter
 from dragon3_pipelines.analysis.primordial_binary import PrimordialBinaryIdentifier
-from dragon3_pipelines.analysis.hdf5_scan import HDF5ScanOptions, HDF5ScanRunner, HDF5ScanSession
+from dragon3_pipelines.analysis.hdf5_scan import (
+    HDF5ScanJob,
+    HDF5ScanOptions,
+    HDF5ScanRunner,
+    HDF5ScanSession,
+    ScanBackedAnalysisBase,
+)
 from dragon3_pipelines.io import HDF5FileProcessor
 
 
@@ -251,6 +257,78 @@ class MetaTask(FakeTask):
     def process_file(self, hdf5_path, df_dict, meta, cache_df):
         self.processed_paths.append(hdf5_path)
         return super().process_file(hdf5_path, df_dict, meta, cache_df)
+
+
+class ScanBackedAnalysisForTest(ScanBackedAnalysisBase):
+    pass
+
+
+def test_scan_backed_analysis_scan_options_merge_and_validate(tmp_path: Path) -> None:
+    analysis = ScanBackedAnalysisForTest(make_config(tmp_path), FakeProcessor([], {}))
+
+    options = analysis._scan_options(
+        defaults={
+            "sample_every_nb_time": 2.0,
+            "parallel": True,
+            "use_hdf5_cache": True,
+            "processes": 8,
+        },
+        overrides={
+            "sample_every_nb_time": None,
+            "parallel": False,
+            "use_hdf5_cache": False,
+            "processes": None,
+        },
+        force=True,
+    )
+
+    assert options.sample_every_nb_time == 2.0
+    assert options.parallel is False
+    assert options.use_hdf5_cache is False
+    assert options.processes == 8
+    assert options.force is True
+
+    with pytest.raises(ValueError, match="typo"):
+        analysis._scan_options(defaults={"typo": 1})
+
+
+def test_scan_backed_analysis_cache_only_path_does_not_touch_hdf5(tmp_path: Path) -> None:
+    analysis = ScanBackedAnalysisForTest(make_config(tmp_path), FakeProcessor([], {}))
+    task = MetaTask("cached", {}, pd.DataFrame({"value": [2, 1]}))
+
+    def finalize_cache(cache_df):
+        return cache_df.sort_values("value").reset_index(drop=True)
+
+    task.finalize_cache = finalize_cache
+    job = HDF5ScanJob("sim", task, HDF5ScanOptions())
+
+    result = analysis._load_or_update_scan_job(job, update=False)
+
+    assert result["value"].tolist() == [1, 2]
+    assert analysis.hdf5_file_processor.read_count == 0
+    assert task.writes == 0
+
+
+def test_scan_backed_analysis_run_scan_job_matches_runner_result(tmp_path: Path) -> None:
+    config = make_config(tmp_path)
+    hdf5_path = str(tmp_path / "snap.40_1.0.h5part")
+    Path(hdf5_path).write_text("fake")
+    tables = {
+        hdf5_path: {
+            "scalars": pd.DataFrame({"TTOT": [1.0]}),
+            "binaries": pd.DataFrame({"TTOT": [1.0]}),
+        }
+    }
+    processor = FakeProcessor([hdf5_path], tables)
+    analysis = ScanBackedAnalysisForTest(config, processor)
+    task = FakeTask("single")
+    job = HDF5ScanJob("sim", task, HDF5ScanOptions(wait_age_hour=0))
+
+    result = analysis._run_scan_job(job)
+
+    expected = pd.DataFrame({"task": ["single"], "path": [hdf5_path]})
+    pd.testing.assert_frame_equal(result, expected)
+    assert processor.read_count == 1
 
 
 def test_scan_runner_reads_each_hdf5_file_once_for_multiple_tasks(tmp_path: Path) -> None:

@@ -16,18 +16,17 @@ from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
     HDF5ScanJob,
     HDF5ScanOptions,
-    HDF5ScanRunner,
+    ScanBackedAnalysisBase,
     default_file_meta,
     file_is_fresh,
     replace_ttot_rows,
 )
-from dragon3_pipelines.io import HDF5FileProcessor
 from dragon3_pipelines.io.text_parsers import make_l7header, transform_l7df_to_sns_friendly
 
 logger = logging.getLogger(__name__)
 
 
-class CurrentMassLagrangianProcessor:
+class CurrentMassLagrangianProcessor(ScanBackedAnalysisBase):
     """Build and cache current-mass Lagrangian profiles from HDF5 snapshots."""
 
     SCHEMA_VERSION = 1
@@ -46,10 +45,6 @@ class CurrentMassLagrangianProcessor:
         "sigma_t2",
         "vrot",
     ]
-
-    def __init__(self, config_manager: Any) -> None:
-        self.config = config_manager
-        self.hdf5_file_processor = HDF5FileProcessor(config_manager)
 
     @property
     def percentages(self) -> List[str]:
@@ -141,18 +136,19 @@ class CurrentMassLagrangianProcessor:
     def update(self, simu_name: str, *, force: bool = False) -> pd.DataFrame:
         """Update the cached current-mass Lagrangian table for one simulation."""
         job = self.build_scan_job(simu_name, force=force)
-        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
-        return runner.run(simu_name, [job.task], job.options)[job.task.name]
+        return self._run_scan_job(job)
 
     def build_scan_job(self, simu_name: str, *, force: bool = False) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
         current_config = self._current_lagrangian_config()
-        options = HDF5ScanOptions(
-            sample_every_nb_time=current_config["sample_every_nb_time"],
-            wait_age_hour=current_config["wait_age_hour"],
-            use_hdf5_cache=current_config.get("use_hdf5_cache", True),
-            parallel=current_config.get("parallel", False),
-            processes=current_config.get("processes"),
+        options = self._scan_options(
+            defaults={
+                "sample_every_nb_time": current_config["sample_every_nb_time"],
+                "wait_age_hour": current_config["wait_age_hour"],
+                "use_hdf5_cache": current_config.get("use_hdf5_cache", True),
+                "parallel": current_config.get("parallel", False),
+                "processes": current_config.get("processes"),
+            },
             force=force,
         )
         task = CurrentMassLagrangianTask(self, simu_name)

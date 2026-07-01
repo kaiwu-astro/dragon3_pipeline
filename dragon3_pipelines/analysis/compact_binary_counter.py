@@ -17,12 +17,10 @@ from dragon3_pipelines.analysis.cache_paths import (
 from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
     HDF5ScanJob,
-    HDF5ScanOptions,
-    HDF5ScanRunner,
+    ScanBackedAnalysisBase,
     default_file_meta,
     file_is_fresh,
 )
-from dragon3_pipelines.io import HDF5FileProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +54,7 @@ CACHE_COLUMNS = [
 ]
 
 
-class CompactBinaryCounter:
+class CompactBinaryCounter(ScanBackedAnalysisBase):
     """Count unique compact binary systems seen across HDF5 snapshots."""
 
     CATEGORIES = ("gw_source", "pulsar", "xray_binary")
@@ -64,9 +62,8 @@ class CompactBinaryCounter:
     BH_KW = 14
     WD_KW = frozenset({10, 11, 12})
 
-    def __init__(self, config_manager: Any) -> None:
-        self.config = config_manager
-        self.hdf5_file_processor = HDF5FileProcessor(config_manager)
+    def __init__(self, config_manager: Any, hdf5_file_processor: Any | None = None) -> None:
+        super().__init__(config_manager, hdf5_file_processor)
         self.compact_object_kw = frozenset(
             int(kw) for kw in getattr(config_manager, "compact_object_KW", [10, 11, 12, 13, 14])
         )
@@ -96,11 +93,7 @@ class CompactBinaryCounter:
             force=force,
         )
         task = job.task
-        if update:
-            runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
-            cache_df = runner.run(simu_name, [task], job.options)[task.name]
-        else:
-            cache_df = task.finalize_cache(task.read_cache())
+        cache_df = self._load_or_update_scan_job(job, update=update)
         return self._summary_from_cache(cache_df, task.read_meta())
 
     def build_scan_job(
@@ -116,13 +109,15 @@ class CompactBinaryCounter:
         force: bool = False,
     ) -> HDF5ScanJob:
         """Build a scan job for batched execution by ``HDF5ScanSession``."""
-        options = HDF5ScanOptions(
-            sample_every_nb_time=sample_every_nb_time,
-            wait_age_hour=wait_age_hour,
-            use_hdf5_cache=use_hdf5_cache,
-            parallel=parallel,
-            processes=processes,
-            exclude_bad_dirname=exclude_bad_dirname,
+        options = self._scan_options(
+            overrides={
+                "sample_every_nb_time": sample_every_nb_time,
+                "wait_age_hour": wait_age_hour,
+                "use_hdf5_cache": use_hdf5_cache,
+                "parallel": parallel,
+                "processes": processes,
+                "exclude_bad_dirname": exclude_bad_dirname,
+            },
             force=force,
         )
         task = CompactBinaryCountTask(self, simu_name)

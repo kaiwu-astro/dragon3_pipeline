@@ -13,22 +13,17 @@ from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
     HDF5ScanJob,
     HDF5ScanOptions,
-    HDF5ScanRunner,
+    ScanBackedAnalysisBase,
     default_file_meta,
     file_is_fresh,
     replace_ttot_rows,
 )
-from dragon3_pipelines.io import HDF5FileProcessor
 
 logger = logging.getLogger(__name__)
 
 
-class BinaryStellarTypeExtractor:
+class BinaryStellarTypeExtractor(ScanBackedAnalysisBase):
     """Load processed binary rows where either component has a target KW code."""
-
-    def __init__(self, config_manager: Any) -> None:
-        self.config = config_manager
-        self.hdf5_file_processor = HDF5FileProcessor(config_manager)
 
     def load_binaries_with_stellar_type(
         self,
@@ -56,12 +51,7 @@ class BinaryStellarTypeExtractor:
             processes=processes,
             force=force,
         )
-        task = job.task
-        if not update:
-            return task.finalize_cache(task.read_cache())
-
-        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
-        return runner.run(simu_name, [task], job.options)[task.name]
+        return self._load_or_update_scan_job(job, update=update)
 
     def build_scan_job(
         self,
@@ -85,18 +75,21 @@ class BinaryStellarTypeExtractor:
             stellar_type=normalized_stellar_type,
         )
         config = self._extraction_config()
-        options = HDF5ScanOptions(
-            sample_every_nb_time=(
-                sample_every_nb_time
-                if sample_every_nb_time is not None
-                else config["sample_every_nb_time"]
-            ),
-            wait_age_hour=wait_age_hour if wait_age_hour is not None else config["wait_age_hour"],
-            use_hdf5_cache=(
-                use_hdf5_cache if use_hdf5_cache is not None else config["use_hdf5_cache"]
-            ),
-            parallel=parallel if parallel is not None else config["parallel"],
-            processes=processes if processes is not None else config["processes"],
+        options = self._scan_options(
+            defaults={
+                "sample_every_nb_time": config["sample_every_nb_time"],
+                "wait_age_hour": config["wait_age_hour"],
+                "use_hdf5_cache": config["use_hdf5_cache"],
+                "parallel": config["parallel"],
+                "processes": config["processes"],
+            },
+            overrides={
+                "sample_every_nb_time": sample_every_nb_time,
+                "wait_age_hour": wait_age_hour,
+                "use_hdf5_cache": use_hdf5_cache,
+                "parallel": parallel,
+                "processes": processes,
+            },
             force=force,
         )
         return HDF5ScanJob(simu_name, task, options)
