@@ -12,6 +12,7 @@ import pandas as pd
 from dragon3_pipelines.analysis.cache_paths import B_TYPE_BINARY_FEATURE, analysis_cache_dir
 from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
+    HDF5ScanJob,
     HDF5ScanOptions,
     HDF5ScanRunner,
     default_file_meta,
@@ -40,8 +41,39 @@ class BTypeBinaryExtractor:
         use_hdf5_cache: bool | None = None,
         parallel: bool | None = None,
         processes: int | None = None,
+        force: bool = False,
     ) -> pd.DataFrame:
         """Return complete processed binary rows containing B-type main-sequence members."""
+        job = self.build_scan_job(
+            simu_name,
+            update=update,
+            sample_every_nb_time=sample_every_nb_time,
+            wait_age_hour=wait_age_hour,
+            use_hdf5_cache=use_hdf5_cache,
+            parallel=parallel,
+            processes=processes,
+            force=force,
+        )
+        task = job.task
+        if not update:
+            return task.finalize_cache(task.read_cache())
+
+        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
+        return runner.run(simu_name, [task], job.options)[task.name]
+
+    def build_scan_job(
+        self,
+        simu_name: str,
+        *,
+        update: bool = True,
+        sample_every_nb_time: float | None = None,
+        wait_age_hour: int | float | None = None,
+        use_hdf5_cache: bool | None = None,
+        parallel: bool | None = None,
+        processes: int | None = None,
+        force: bool = False,
+    ) -> HDF5ScanJob:
+        """Build a scan job for batched execution by ``HDF5ScanSession``."""
         config = self._extraction_config()
         options = HDF5ScanOptions(
             sample_every_nb_time=(
@@ -55,6 +87,7 @@ class BTypeBinaryExtractor:
             ),
             parallel=parallel if parallel is not None else config["parallel"],
             processes=processes if processes is not None else config["processes"],
+            force=force,
         )
 
         primordial = self._load_primordial_binaries(
@@ -69,11 +102,7 @@ class BTypeBinaryExtractor:
             primordial_pair_keys=self._primordial_pair_keys(primordial),
             primordial_signature=self._primordial_signature(simu_name),
         )
-        if not update:
-            return task.finalize_cache(task.read_cache())
-
-        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
-        return runner.run(simu_name, [task], options)[task.name]
+        return HDF5ScanJob(simu_name, task, options)
 
     def _load_primordial_binaries(
         self,

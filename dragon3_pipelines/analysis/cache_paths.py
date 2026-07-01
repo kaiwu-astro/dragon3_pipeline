@@ -11,6 +11,7 @@ AnalysisCacheFeature = Literal[
     "b_type_binary",
     "binary_stellar_type",
     "current_lagrangian",
+    "compact_binary_count",
 ]
 
 PARTICLE_DF_FEATURE: AnalysisCacheFeature = "particle_df"
@@ -18,6 +19,7 @@ PRIMORDIAL_BINARY_FEATURE: AnalysisCacheFeature = "primordial_binary"
 B_TYPE_BINARY_FEATURE: AnalysisCacheFeature = "b_type_binary"
 BINARY_STELLAR_TYPE_FEATURE: AnalysisCacheFeature = "binary_stellar_type"
 CURRENT_LAGRANGIAN_FEATURE: AnalysisCacheFeature = "current_lagrangian"
+COMPACT_BINARY_COUNT_FEATURE: AnalysisCacheFeature = "compact_binary_count"
 
 
 def analysis_cache_dir(config: Any, simu_name: str, feature: AnalysisCacheFeature) -> Path:

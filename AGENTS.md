@@ -314,6 +314,7 @@ analysis/data-reduction 产生的中间结果缓存统一放在 `paths.analysis_
 - `b_type_binary`
 - `binary_stellar_type`
 - `current_lagrangian`
+- `compact_binary_count`
 
 代码中不要手写拼接这些目录；应使用 `dragon3_pipelines.analysis.cache_paths.analysis_cache_dir(config, simu_name, feature)` 以及该模块中定义的 feature 常量。`ConfigManager` 会派生：
 
@@ -414,6 +415,8 @@ HDF5 文件中的可绘图信息大体分为两类，维护时应先判断属于
 - **宏观信息（macroscopic information）**：单个 snapshot 只贡献一个或少量统计点，例如需要画随时间演化的统计量。此类图需要遍历大量 HDF5 files 收集时间序列，应作为 analysis/data-reduction 扫描任务处理。
 
 未来凡是“遍历 HDF5 文件抽取小型信息”的 analysis/data-reduction 功能，优先实现为 `HDF5ScanTask` 并通过 `HDF5ScanRunner` 执行。不要复制新的 HDF5 遍历循环，也不要把这类缓存写入逻辑塞进绘图主循环；`SimulationPlotter.plot_hdf5_file` 应保持绘图调度职责。
+
+当同一 simulation 下需要同时运行多个 HDF5 scan task 时，优先通过 `HDF5ScanSession` 堆积 job 后统一 `run()`，让相同 scan options 的任务共享 HDF5 文件读取。默认尾部增量策略会信任已处理尾部之前的旧文件；旧 HDF5 文件被手动改写时应使用 `force=True` 或删除对应 analysis cache 后重建。
 
 ### ❌ 其他禁止事项
 

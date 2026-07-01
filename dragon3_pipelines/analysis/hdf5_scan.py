@@ -12,6 +12,7 @@ import json
 import logging
 import multiprocessing
 import os
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Protocol, Sequence
@@ -34,6 +35,17 @@ class HDF5ScanOptions:
     parallel: bool = False
     processes: int | None = None
     exclude_bad_dirname: bool = True
+    force: bool = False
+    incremental_from_cache_tail: bool = True
+
+
+@dataclass(frozen=True)
+class HDF5ScanJob:
+    """One scan task queued for one simulation with one option set."""
+
+    simu_name: str
+    task: HDF5ScanTask
+    options: HDF5ScanOptions
 
 
 class HDF5ScanTask(Protocol):
@@ -89,6 +101,13 @@ class HDF5ScanRunner:
         """Run tasks over stale HDF5 files and return each task's cache DataFrame."""
         if not tasks:
             return {}
+        task_names = [task.name for task in tasks]
+        duplicate_task_names = sorted({name for name in task_names if task_names.count(name) > 1})
+        if duplicate_task_names:
+            raise ValueError(
+                "HDF5 scan tasks in one run must have unique names: "
+                + ", ".join(duplicate_task_names)
+            )
 
         states: Dict[str, Dict[str, Any]] = {}
         stale_tasks_by_file: Dict[str, list[HDF5ScanTask]] = {}
@@ -100,15 +119,19 @@ class HDF5ScanRunner:
         )
 
         for task in tasks:
-            cache_df = task.finalize_cache(task.read_cache())
-            meta = task.read_meta()
+            if options.force:
+                cache_df = pd.DataFrame()
+                meta: Dict[str, Any] = {}
+            else:
+                cache_df = task.finalize_cache(task.read_cache())
+                meta = task.read_meta()
             states[task.name] = {
                 "cache_df": cache_df,
                 "meta": meta,
                 "processed_files": dict(meta.get("processed_files", {})),
             }
-            for hdf5_path in hdf5_paths:
-                if not task.is_file_fresh(hdf5_path, meta, cache_df):
+            for hdf5_path in self._paths_to_check_for_task(task, hdf5_paths, meta, options):
+                if options.force or not task.is_file_fresh(hdf5_path, meta, cache_df):
                     stale_tasks_by_file.setdefault(hdf5_path, []).append(task)
 
         work_items = [
@@ -143,6 +166,31 @@ class HDF5ScanRunner:
             task.write_cache_and_meta(cache_df, state["processed_files"], options)
             output[task.name] = cache_df
         return output
+
+    def _paths_to_check_for_task(
+        self,
+        task: HDF5ScanTask,
+        hdf5_paths: Sequence[str],
+        meta: Mapping[str, Any],
+        options: HDF5ScanOptions,
+    ) -> Sequence[str]:
+        if options.force or not options.incremental_from_cache_tail:
+            return hdf5_paths
+
+        processed_files = meta.get("processed_files", {})
+        if not processed_files:
+            return hdf5_paths
+
+        processed_indices = [
+            index for index, hdf5_path in enumerate(hdf5_paths) if hdf5_path in processed_files
+        ]
+        if not processed_indices:
+            return hdf5_paths
+        tail_start = max(processed_indices)
+        unprocessed_before_tail = [
+            hdf5_path for hdf5_path in hdf5_paths[:tail_start] if hdf5_path not in processed_files
+        ]
+        return [*unprocessed_before_tail, *hdf5_paths[tail_start:]]
 
     def _run_parallel(
         self,
@@ -212,6 +260,47 @@ def _merge_columns_by_table(
         table: None if table_columns is None else sorted(table_columns)
         for table, table_columns in columns.items()
     }
+
+
+class HDF5ScanSession:
+    """Queue HDF5 scan jobs and batch compatible jobs into shared file reads."""
+
+    def __init__(self, config_manager: Any, hdf5_file_processor: HDF5FileProcessor | None = None):
+        self.config = config_manager
+        self.hdf5_file_processor = hdf5_file_processor or HDF5FileProcessor(config_manager)
+        self.jobs: list[HDF5ScanJob] = []
+
+    def add_job(self, job: HDF5ScanJob) -> HDF5ScanJob:
+        """Queue one scan job and return it for caller-side bookkeeping."""
+        self.jobs.append(job)
+        return job
+
+    def add_task(
+        self,
+        simu_name: str,
+        task: HDF5ScanTask,
+        options: HDF5ScanOptions | None = None,
+    ) -> HDF5ScanJob:
+        """Create and queue one scan job."""
+        return self.add_job(HDF5ScanJob(simu_name, task, options or HDF5ScanOptions()))
+
+    def run(self) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """Run queued jobs grouped by simulation and options, then clear the queue."""
+        groups: dict[tuple[str, HDF5ScanOptions], list[HDF5ScanTask]] = defaultdict(list)
+        for job in self.jobs:
+            groups[(job.simu_name, job.options)].append(job.task)
+
+        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
+        output: Dict[str, Dict[str, pd.DataFrame]] = {}
+        completed = False
+        try:
+            for (simu_name, options), tasks in groups.items():
+                output.setdefault(simu_name, {}).update(runner.run(simu_name, tasks, options))
+            completed = True
+            return output
+        finally:
+            if completed:
+                self.jobs.clear()
 
 
 class FeatherMetaCacheMixin:
@@ -308,7 +397,7 @@ def file_is_fresh(
     current_mtime = file_mtime(hdf5_path)
     if np.isnan(current_mtime):
         return False
-    if not np.isclose(float(file_meta.get("mtime", np.nan)), current_mtime):
+    if not np.isclose(float(file_meta.get("mtime", np.nan)), current_mtime, rtol=0.0, atol=1e-9):
         return False
     if cached_times is None:
         return True

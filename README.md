@@ -151,6 +151,19 @@ ns_binaries = extractor.load_binaries_with_stellar_type("my_sim", kw=13)
 
 The returned table contains the complete processed binary rows for every snapshot where either binary component matches the requested stellar type or KW code.
 
+HDF5 data-reduction tasks for getting macroscopic data can be batched with `HDF5ScanSession` so compatible tasks share HDF5 reads:
+(here macroscopic data from HDF5 files means a few data points per HDF5 snapshot, such as center-of-mass info, largrangian data; in contract with many data points per snapshot such as X and V of all single stars)
+
+```python
+from dragon3_pipelines.analysis import BTypeBinaryExtractor, BinaryStellarTypeExtractor
+from dragon3_pipelines.analysis.hdf5_scan import HDF5ScanSession
+
+session = HDF5ScanSession(config)
+session.add_job(BinaryStellarTypeExtractor(config).build_scan_job("my_sim", stellar_type="BH"))
+session.add_job(BTypeBinaryExtractor(config).build_scan_job("my_sim"))
+results = session.run()
+```
+
 ### Create Visualizations
 
 ```python

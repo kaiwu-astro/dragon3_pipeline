@@ -722,8 +722,15 @@ class TestCompactBinaryCounter:
     """Tests for cross-snapshot compact binary counting."""
 
     @pytest.fixture
-    def mock_config(self):
+    def mock_config(self, tmp_path):
         config = Mock()
+        config.analysis_cache_dir_of = {"test_simu": str(tmp_path / "cache" / "test_simu")}
+        config.particle_df_cache_dir_of = {
+            "test_simu": str(tmp_path / "cache" / "test_simu" / "particle_df")
+        }
+        config.pathof = {"test_simu": str(tmp_path)}
+        config.input_file_path_of = {"test_simu": str(tmp_path / "input.inp")}
+        config.processes_count = 1
         config.compact_object_KW = np.array([10, 11, 12, 13, 14])
         config.kw_to_stellar_type = {
             0: "MS",
@@ -793,16 +800,17 @@ class TestCompactBinaryCounter:
         scalars = pd.DataFrame({"TTOT": [1.0, 2.0], "Time[Myr]": [10.0, 20.0]}).set_index(
             "TTOT", drop=False
         )
-        snapshots = {
-            1.0: self._binary_df([(1, 2, 14, 14, 1.0, 10.0), (3, 4, 13, 1, 1.0, 10.0)]),
-            2.0: self._binary_df([(2, 1, 14, 13, 2.0, 20.0), (5, 6, 10, 1, 2.0, 20.0)]),
-        }
-        df_dict = {"scalars": scalars, "singles": pd.DataFrame(), "binaries": pd.DataFrame()}
+        binaries = pd.concat(
+            [
+                self._binary_df([(1, 2, 14, 14, 1.0, 10.0), (3, 4, 13, 1, 1.0, 10.0)]),
+                self._binary_df([(2, 1, 14, 13, 2.0, 20.0), (5, 6, 10, 1, 2.0, 20.0)]),
+            ],
+            ignore_index=True,
+        )
 
         counter.hdf5_file_processor.get_all_hdf5_paths = Mock(return_value=["/tmp/a.h5part"])
-        counter.hdf5_file_processor.read_file = Mock(return_value=df_dict)
-        counter.hdf5_file_processor.get_snapshot_at_t = Mock(
-            side_effect=lambda _df_dict, ttot: (pd.DataFrame(), snapshots[ttot], True)
+        counter.hdf5_file_processor.read_tables = Mock(
+            return_value={"scalars": scalars, "binaries": binaries}
         )
 
         result = counter.summarize_simulation(
@@ -819,12 +827,8 @@ class TestCompactBinaryCounter:
             exclude_bad_dirname=False,
             wait_age_hour=3,
         )
-        counter.hdf5_file_processor.read_file.assert_called_once_with(
-            "/tmp/a.h5part",
-            "test_simu",
-            use_cache=False,
-        )
-        assert counter.hdf5_file_processor.get_snapshot_at_t.call_count == 2
+        counter.hdf5_file_processor.read_tables.assert_called_once()
+        assert counter.hdf5_file_processor.read_tables.call_args.kwargs["use_cache"] is False
         assert result["summary"] == {
             "gw_source": 1,
             "pulsar": 1,

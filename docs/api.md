@@ -51,6 +51,7 @@ ns_binaries = extractor.load_binaries_with_stellar_type("20sb", kw="13")
 ```
 
 Specify exactly one of `stellar_type` or `kw`. StellarType abbreviations are matched case-insensitively using `default_config.yaml` `stellar_types`.
+Pass `force=True` to rebuild the analysis cache from HDF5 files.
 
 ### `dragon3_pipelines.analysis.BTypeBinaryExtractor`
 
@@ -64,7 +65,29 @@ config = ConfigManager()
 df = BTypeBinaryExtractor(config).load_b_type_binaries("20sb")
 ```
 
-The returned table preserves the processed binary rows and adds `b_type_member1`, `b_type_member2`, `b_type_member_count`, `b_type_pair_key`, and `is_primordial_binary`. Results are cached separately under the simulation particle cache directory.
+The returned table preserves the processed binary rows and adds `b_type_member1`, `b_type_member2`, `b_type_member_count`, `b_type_pair_key`, and `is_primordial_binary`. Results are cached under `paths.analysis_cache_dir`.
+
+### `dragon3_pipelines.analysis.hdf5_scan.HDF5ScanSession`
+
+Batch compatible HDF5 data-reduction tasks so each HDF5 file is read once per simulation/options group.
+
+```python
+from dragon3_pipelines.analysis import BTypeBinaryExtractor, BinaryStellarTypeExtractor
+from dragon3_pipelines.analysis.hdf5_scan import HDF5ScanSession
+from dragon3_pipelines.config import ConfigManager
+
+config = ConfigManager()
+session = HDF5ScanSession(config)
+session.add_job(BinaryStellarTypeExtractor(config).build_scan_job("20sb", stellar_type="BH"))
+session.add_job(BTypeBinaryExtractor(config).build_scan_job("20sb"))
+results = session.run()
+```
+
+`HDF5ScanOptions` defaults to tail-incremental cache validation. Use `force=True` to ignore old cache/meta and rebuild from scratch.
+
+### `dragon3_pipelines.analysis.CompactBinaryCounter`
+
+Count compact binary categories across snapshots. `summarize_simulation()` returns the existing `{"summary": ..., "details": ...}` structure and caches per-snapshot category hits under `compact_binary_count`.
 
 ### `dragon3_pipelines.analysis.tau_gw`
 

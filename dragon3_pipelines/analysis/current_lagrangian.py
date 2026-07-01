@@ -14,6 +14,7 @@ import pandas as pd
 from dragon3_pipelines.analysis.cache_paths import CURRENT_LAGRANGIAN_FEATURE, analysis_cache_dir
 from dragon3_pipelines.analysis.hdf5_scan import (
     FeatherMetaCacheMixin,
+    HDF5ScanJob,
     HDF5ScanOptions,
     HDF5ScanRunner,
     default_file_meta,
@@ -131,12 +132,20 @@ class CurrentMassLagrangianProcessor:
             current_mtime = os.path.getmtime(hdf5_path)
         except OSError:
             return False
-        if not np.isclose(float(file_meta.get("mtime", np.nan)), current_mtime):
+        if not np.isclose(
+            float(file_meta.get("mtime", np.nan)), current_mtime, rtol=0.0, atol=1e-9
+        ):
             return False
         return set(file_meta.get("ttot", [])).issubset(cached_times)
 
-    def update(self, simu_name: str) -> pd.DataFrame:
+    def update(self, simu_name: str, *, force: bool = False) -> pd.DataFrame:
         """Update the cached current-mass Lagrangian table for one simulation."""
+        job = self.build_scan_job(simu_name, force=force)
+        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
+        return runner.run(simu_name, [job.task], job.options)[job.task.name]
+
+    def build_scan_job(self, simu_name: str, *, force: bool = False) -> HDF5ScanJob:
+        """Build a scan job for batched execution by ``HDF5ScanSession``."""
         current_config = self._current_lagrangian_config()
         options = HDF5ScanOptions(
             sample_every_nb_time=current_config["sample_every_nb_time"],
@@ -144,10 +153,10 @@ class CurrentMassLagrangianProcessor:
             use_hdf5_cache=current_config.get("use_hdf5_cache", True),
             parallel=current_config.get("parallel", False),
             processes=current_config.get("processes"),
+            force=force,
         )
         task = CurrentMassLagrangianTask(self, simu_name)
-        runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
-        return runner.run(simu_name, [task], options)[task.name]
+        return HDF5ScanJob(simu_name, task, options)
 
     def load_sns_friendly_data(self, simu_name: str, update: bool = True) -> pd.DataFrame:
         """Return a seaborn-friendly long table compatible with ``LagrVisualizer``."""
@@ -435,7 +444,7 @@ class CurrentMassLagrangianTask(FeatherMetaCacheMixin):
         old_file_meta = meta.get("processed_files", {}).get(hdf5_path)
         current_mtime = file_meta["mtime"]
         if old_file_meta and not np.isclose(
-            float(old_file_meta.get("mtime", np.nan)), current_mtime
+            float(old_file_meta.get("mtime", np.nan)), current_mtime, rtol=0.0, atol=1e-9
         ):
             times_to_compute = file_meta["ttot"]
         else:

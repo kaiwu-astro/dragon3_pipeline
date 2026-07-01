@@ -4,11 +4,24 @@ from __future__ import annotations
 
 import logging
 from numbers import Number
-from typing import Any, Dict, Hashable, Iterable, Tuple
+from pathlib import Path
+from typing import Any, Dict, Hashable, Iterable, Mapping, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
+from dragon3_pipelines.analysis.cache_paths import (
+    COMPACT_BINARY_COUNT_FEATURE,
+    analysis_cache_dir,
+)
+from dragon3_pipelines.analysis.hdf5_scan import (
+    FeatherMetaCacheMixin,
+    HDF5ScanJob,
+    HDF5ScanOptions,
+    HDF5ScanRunner,
+    default_file_meta,
+    file_is_fresh,
+)
 from dragon3_pipelines.io import HDF5FileProcessor
 
 logger = logging.getLogger(__name__)
@@ -29,6 +42,17 @@ DETAIL_COLUMNS = [
     "first_stellar_type",
     "last_stellar_type",
     "n_snapshots_seen_in_category",
+]
+
+CACHE_COLUMNS = [
+    "category",
+    "bin_name1",
+    "bin_name2",
+    "TTOT",
+    "Time[Myr]",
+    "kw1",
+    "kw2",
+    "stellar_type",
 ]
 
 
@@ -55,68 +79,105 @@ class CompactBinaryCounter:
         wait_age_hour: int = 24,
         exclude_bad_dirname: bool = True,
         use_hdf5_cache: bool = True,
+        update: bool = True,
+        parallel: bool = False,
+        processes: int | None = None,
+        force: bool = False,
     ) -> Dict[str, Any]:
         """Summarize unique compact binary systems seen from available snapshots."""
-        hdf5_paths = self.hdf5_file_processor.get_all_hdf5_paths(
+        job = self.build_scan_job(
             simu_name,
             sample_every_nb_time=sample_every_nb_time,
-            exclude_bad_dirname=exclude_bad_dirname,
             wait_age_hour=wait_age_hour,
+            exclude_bad_dirname=exclude_bad_dirname,
+            use_hdf5_cache=use_hdf5_cache,
+            parallel=parallel,
+            processes=processes,
+            force=force,
         )
+        task = job.task
+        if update:
+            runner = HDF5ScanRunner(self.config, self.hdf5_file_processor)
+            cache_df = runner.run(simu_name, [task], job.options)[task.name]
+        else:
+            cache_df = task.finalize_cache(task.read_cache())
+        return self._summary_from_cache(cache_df, task.read_meta())
+
+    def build_scan_job(
+        self,
+        simu_name: str,
+        *,
+        sample_every_nb_time: float = 1.0,
+        wait_age_hour: int | float = 24,
+        exclude_bad_dirname: bool = True,
+        use_hdf5_cache: bool = True,
+        parallel: bool = False,
+        processes: int | None = None,
+        force: bool = False,
+    ) -> HDF5ScanJob:
+        """Build a scan job for batched execution by ``HDF5ScanSession``."""
+        options = HDF5ScanOptions(
+            sample_every_nb_time=sample_every_nb_time,
+            wait_age_hour=wait_age_hour,
+            use_hdf5_cache=use_hdf5_cache,
+            parallel=parallel,
+            processes=processes,
+            exclude_bad_dirname=exclude_bad_dirname,
+            force=force,
+        )
+        task = CompactBinaryCountTask(self, simu_name)
+        return HDF5ScanJob(simu_name, task, options)
+
+    def _summary_from_cache(self, cache_df: pd.DataFrame, meta: Dict[str, Any]) -> Dict[str, Any]:
         records_by_category: Dict[str, Dict[Tuple[Hashable, Hashable], Dict[str, Any]]] = {
             category: {} for category in self.CATEGORIES
         }
-        scanned_snapshots = 0
-        max_ttot = np.nan
-        max_time_myr = np.nan
-
-        for hdf5_path in hdf5_paths:
-            df_dict = self._read_counting_tables(hdf5_path, simu_name, use_hdf5_cache)
-            used_counting_cache = set(df_dict.keys()) == {"scalars", "binaries"}
-            ttot_values = self._snapshot_times(df_dict)
-
-            if used_counting_cache:
-                scanned_snapshots += len(ttot_values)
-                if ttot_values:
-                    max_ttot = self._nanmax(max_ttot, max(ttot_values))
-                file_max_time = self._file_max_time_myr(df_dict)
-                max_time_myr = self._nanmax(max_time_myr, file_max_time)
-                binaries = df_dict.get("binaries", pd.DataFrame())
-                if not binaries.empty and "TTOT" in binaries.columns:
-                    for _, binary_df_at_t in binaries.groupby("TTOT", sort=True):
-                        self._accumulate_snapshot(records_by_category, binary_df_at_t)
-                continue
-
-            for ttot in ttot_values:
-                _, binary_df_at_t, is_valid = self.hdf5_file_processor.get_snapshot_at_t(
-                    df_dict, ttot
+        if not cache_df.empty:
+            for _, row in cache_df.iterrows():
+                category = str(row["category"])
+                if category not in records_by_category:
+                    continue
+                key, bin_name1, bin_name2 = self._binary_key(row["bin_name1"], row["bin_name2"])
+                self._update_category_record(
+                    records_by_category[category],
+                    key,
+                    bin_name1,
+                    bin_name2,
+                    pd.Series(
+                        {
+                            "TTOT": row["TTOT"],
+                            "Time[Myr]": row.get("Time[Myr]", np.nan),
+                            "Stellar Type": row.get("stellar_type", None),
+                        }
+                    ),
+                    int(row["kw1"]),
+                    int(row["kw2"]),
                 )
-                if not is_valid or binary_df_at_t is None:
-                    logger.warning(
-                        "Skipping invalid compact binary snapshot %s TTOT=%s", hdf5_path, ttot
-                    )
-                    continue
-
-                scanned_snapshots += 1
-                max_ttot = self._nanmax(max_ttot, float(ttot))
-                snapshot_max_time = self._snapshot_time_myr(df_dict, binary_df_at_t, ttot)
-                max_time_myr = self._nanmax(max_time_myr, snapshot_max_time)
-
-                if binary_df_at_t.empty:
-                    continue
-                self._accumulate_snapshot(records_by_category, binary_df_at_t)
 
         details = {
             category: self._records_to_dataframe(records_by_category[category])
             for category in self.CATEGORIES
         }
         summary = {category: len(details[category]) for category in self.CATEGORIES}
+        processed_files = meta.get("processed_files", {})
+        ttot_values = [
+            float(ttot)
+            for file_meta in processed_files.values()
+            for ttot in file_meta.get("ttot", [])
+            if pd.notna(ttot)
+        ]
+        time_values = [
+            float(time_myr)
+            for file_meta in processed_files.values()
+            for time_myr in file_meta.get("time_myr", [])
+            if pd.notna(time_myr)
+        ]
         summary.update(
             {
-                "scanned_files": len(hdf5_paths),
-                "scanned_snapshots": scanned_snapshots,
-                "max_ttot": None if np.isnan(max_ttot) else max_ttot,
-                "max_time_myr": None if np.isnan(max_time_myr) else max_time_myr,
+                "scanned_files": len(processed_files),
+                "scanned_snapshots": len(ttot_values),
+                "max_ttot": max(ttot_values) if ttot_values else None,
+                "max_time_myr": max(time_values) if time_values else None,
             }
         )
         return {"summary": summary, "details": details}
@@ -368,3 +429,137 @@ class CompactBinaryCounter:
         if np.isnan(value):
             return previous
         return max(previous, value)
+
+
+class CompactBinaryCountTask(FeatherMetaCacheMixin):
+    """Scan task storing compact-binary category hits per snapshot."""
+
+    schema_version = 1
+    required_tables: Sequence[str] = ("scalars", "binaries")
+    columns_by_table: Mapping[str, Sequence[str] | None] = {
+        "scalars": ["TTOT", "Time[Myr]"],
+        "binaries": [
+            "Bin Name1",
+            "Bin Name2",
+            "Bin KW1",
+            "Bin KW2",
+            "TTOT",
+            "Time[Myr]",
+            "Stellar Type",
+        ],
+    }
+
+    def __init__(self, counter: CompactBinaryCounter, simu_name: str) -> None:
+        self.counter = counter
+        self.config = counter.config
+        self.simu_name = simu_name
+        self.name = "compact_binary_count"
+
+    @property
+    def cache_path(self) -> Path:
+        return (
+            analysis_cache_dir(self.config, self.simu_name, COMPACT_BINARY_COUNT_FEATURE)
+            / "compact_binary_snapshots.feather"
+        )
+
+    def read_cache(self) -> pd.DataFrame:
+        cache_df = super().read_cache()
+        if cache_df.empty:
+            return pd.DataFrame(columns=CACHE_COLUMNS)
+        return cache_df
+
+    def is_file_fresh(self, hdf5_path: str, meta: Dict[str, Any], cache_df: pd.DataFrame) -> bool:
+        return file_is_fresh(hdf5_path, meta)
+
+    def process_file(
+        self,
+        hdf5_path: str,
+        df_dict: Dict[str, pd.DataFrame],
+        meta: Dict[str, Any],
+        cache_df: pd.DataFrame,
+    ) -> Dict[str, Any]:
+        file_meta = self._file_meta(hdf5_path, df_dict)
+        rows = []
+        binaries = df_dict.get("binaries", pd.DataFrame())
+        if not binaries.empty:
+            missing = {"Bin Name1", "Bin Name2", "Bin KW1", "Bin KW2", "TTOT"}.difference(
+                binaries.columns
+            )
+            if missing:
+                raise ValueError(
+                    "Binary table missing required columns for compact binary counting: "
+                    + ", ".join(sorted(missing))
+                )
+            candidate_df = binaries.loc[self.counter._candidate_mask(binaries)]
+            for _, row in candidate_df.iterrows():
+                kw1 = int(row["Bin KW1"])
+                kw2 = int(row["Bin KW2"])
+                for category in self.counter._categories_for(kw1, kw2):
+                    rows.append(
+                        {
+                            "category": category,
+                            "bin_name1": row["Bin Name1"],
+                            "bin_name2": row["Bin Name2"],
+                            "TTOT": float(row["TTOT"]),
+                            "Time[Myr]": self._row_time_myr(row, df_dict),
+                            "kw1": kw1,
+                            "kw2": kw2,
+                            "stellar_type": self.counter._stellar_type(row, kw1, kw2),
+                        }
+                    )
+        return {"rows": pd.DataFrame(rows, columns=CACHE_COLUMNS), "file_meta": file_meta}
+
+    def merge_file_result(
+        self, cache_df: pd.DataFrame, hdf5_path: str, result: Dict[str, Any]
+    ) -> pd.DataFrame:
+        ttot_values = result.get("file_meta", {}).get("ttot", [])
+        if "TTOT" in cache_df.columns and ttot_values:
+            cache_df = cache_df[~cache_df["TTOT"].astype(float).isin(ttot_values)]
+        new_df = result.get("rows", pd.DataFrame(columns=CACHE_COLUMNS))
+        if new_df.empty:
+            return cache_df.reset_index(drop=True)
+        if cache_df.empty:
+            return new_df.reset_index(drop=True)
+        return pd.concat([cache_df, new_df], ignore_index=True, sort=False)
+
+    def finalize_cache(self, cache_df: pd.DataFrame) -> pd.DataFrame:
+        if cache_df.empty:
+            return pd.DataFrame(columns=CACHE_COLUMNS)
+        sort_columns = [
+            col for col in ["TTOT", "category", "bin_name1", "bin_name2"] if col in cache_df
+        ]
+        if sort_columns:
+            cache_df = cache_df.sort_values(sort_columns)
+        return cache_df.reset_index(drop=True)
+
+    def _file_meta(self, hdf5_path: str, df_dict: Mapping[str, pd.DataFrame]) -> Dict[str, Any]:
+        file_meta = default_file_meta(hdf5_path, df_dict)
+        scalars = df_dict.get("scalars", pd.DataFrame())
+        if "Time[Myr]" in scalars.columns:
+            file_meta["time_myr"] = [
+                float(time_myr) for time_myr in scalars["Time[Myr]"].dropna().tolist()
+            ]
+        else:
+            file_meta["time_myr"] = []
+        return file_meta
+
+    def _row_time_myr(self, row: pd.Series, df_dict: Mapping[str, pd.DataFrame]) -> float:
+        if "Time[Myr]" in row and pd.notna(row["Time[Myr]"]):
+            return float(row["Time[Myr]"])
+
+        scalars = df_dict.get("scalars", pd.DataFrame())
+        if "Time[Myr]" not in scalars.columns:
+            return np.nan
+        ttot = float(row["TTOT"])
+        try:
+            scalar_row = scalars.loc[ttot]
+        except KeyError:
+            if "TTOT" not in scalars.columns:
+                return np.nan
+            scalar_rows = scalars[scalars["TTOT"].astype(float) == ttot]
+            if scalar_rows.empty:
+                return np.nan
+            scalar_row = scalar_rows.iloc[0]
+        if isinstance(scalar_row, pd.DataFrame):
+            scalar_row = scalar_row.iloc[0]
+        return float(scalar_row["Time[Myr]"])
